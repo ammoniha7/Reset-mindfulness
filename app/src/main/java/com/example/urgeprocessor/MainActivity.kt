@@ -1,27 +1,19 @@
 package com.example.urgeprocessor
 
 import android.content.Context
-import android.os.Bundle
-import android.os.Vibrator
-import android.os.VibrationEffect
-import android.os.Build
+import android.os.*
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -32,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -54,16 +47,12 @@ data class UrgeEntry(
     var specificEmotion: String = "",
     var emotionColor: String = "",
     var feltLoved: String = "",
-    var struggleToday: String = "",
-    var struggleWeek: String = "",
+    var stressReason: String = "",
     var excitementWeek: String = ""
 )
 
 @Entity(tableName = "quotes")
-data class Quote(
-    @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val text: String
-)
+data class Quote(@PrimaryKey(autoGenerate = true) val id: Int = 0, val text: String)
 
 @Dao
 interface UrgeDao {
@@ -71,25 +60,21 @@ interface UrgeDao {
     @Query("SELECT * FROM urge_entries ORDER BY timestamp DESC")
     fun getAllEntries(): kotlinx.coroutines.flow.Flow<List<UrgeEntry>>
     @Delete suspend fun deleteEntry(entry: UrgeEntry): Int
-
     @Insert suspend fun insertQuote(quote: Quote): Long
     @Query("SELECT * FROM quotes")
     fun getAllQuotes(): kotlinx.coroutines.flow.Flow<List<Quote>>
     @Delete suspend fun deleteQuote(quote: Quote): Int
 }
 
-@Database(entities = [UrgeEntry::class, Quote::class], version = 2)
+@Database(entities = [UrgeEntry::class, Quote::class], version = 4)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun urgeDao(): UrgeDao
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    AppDatabase::class.java,
-                    "urge_db"
-                ).fallbackToDestructiveMigration().build()
+                val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "urge_db")
+                    .fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance
             }
@@ -97,60 +82,41 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
-// --- UTILS & HELPERS ---
+// --- UTILS ---
 
 fun triggerVibration(context: Context, type: String) {
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     vibrator.cancel()
-
-    // Define the pattern
     val pattern = when (type) {
-        "Inhale" -> longArrayOf(0, 60)              // Reduced from 200 to 60
-        "Hold" -> longArrayOf(0, 30, 60, 30)       // Very sharp double-click
-        "Exhale" -> longArrayOf(0, 250)            // Reduced from 500 to 250
+        "Inhale" -> longArrayOf(0, 60)
+        "Hold" -> longArrayOf(0, 30, 60, 30)
+        "Exhale" -> longArrayOf(0, 250)
         "Done" -> longArrayOf(0, 50, 40, 50, 40, 150)
         else -> longArrayOf(0, 30)
     }
-
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        // THE TRICK: Set the Usage to USAGE_ALARM or USAGE_RINGTONE
-        // This tells Android "This is important, don't block it like a button click"
         val attributes = android.media.AudioAttributes.Builder()
             .setUsage(android.media.AudioAttributes.USAGE_ALARM)
             .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
-
         vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1), attributes)
     } else {
-        @Suppress("DEPRECATION")
-        vibrator.vibrate(pattern, -1)
+        @Suppress("DEPRECATION") vibrator.vibrate(pattern, -1)
     }
 }
 
-fun exportEntriesToCsv(context: Context, entries: List<UrgeEntry>) {
-    val csvHeader = "Date,Category,Emotion,Color,Felt Loved,Struggle Today,Struggle Week,Excited For\n"
-    val csvData = entries.joinToString(separator = "\n") { entry ->
-        val date = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(entry.timestamp))
-        "\"$date\",\"${entry.category}\",\"${entry.specificEmotion}\",\"${entry.emotionColor}\",\"${entry.feltLoved}\",\"${entry.struggleToday}\",\"${entry.struggleWeek}\",\"${entry.excitementWeek}\""
-    }
-    val sendIntent = android.content.Intent().apply {
-        action = android.content.Intent.ACTION_SEND
-        putExtra(android.content.Intent.EXTRA_TEXT, csvHeader + csvData)
-        type = "text/plain"
-    }
-    context.startActivity(android.content.Intent.createChooser(sendIntent, "Export Journal"))
+fun saveCustomColor(context: Context, key: String, color: Color) {
+    val prefs = context.getSharedPreferences("color_prefs", Context.MODE_PRIVATE)
+    prefs.edit().putInt(key, color.toArgb()).apply()
 }
 
-fun calculateStreak(entries: List<UrgeEntry>): Int {
-    if (entries.isEmpty()) return 0
-    val today = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
-    val uniqueDays = entries.map { Calendar.getInstance().apply { timeInMillis = it.timestamp; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis }.distinct().sortedDescending()
-    var streak = 0
-    val firstDay = uniqueDays.firstOrNull() ?: return 0
-    var checkDate = if (firstDay == today) today else if (firstDay == today - 86400000L) today - 86400000L else return 0
-    for (day in uniqueDays) { if (day == checkDate) { streak++; checkDate -= 86400000L } else break }
-    return streak
+fun getCustomColor(context: Context, key: String, default: Color): Color {
+    val prefs = context.getSharedPreferences("color_prefs", Context.MODE_PRIVATE)
+    val colorInt = prefs.getInt(key, default.toArgb())
+    return Color(colorInt)
 }
+
+fun Color.toHexString(): String = String.format("#%08X", this.toArgb())
 
 // --- MAIN ACTIVITY ---
 
@@ -192,7 +158,7 @@ enum class AppDestinations(val label: String, val icon: androidx.compose.ui.grap
     STATS("Insights", Icons.Default.Insights)
 }
 
-enum class FlowStep { CATEGORY, SPECIFIC, COLOR, LOVED, STRUGGLE_TODAY, STRUGGLE_WEEK, EXCITEMENT, COMPLETE }
+enum class FlowStep { CATEGORY, SPECIFIC, COLOR, LOVED, STRESS, EXCITEMENT, COMPLETE }
 
 // --- SCREENS ---
 
@@ -222,42 +188,24 @@ fun BreathingScreen() {
         if (isRunning) {
             cyclesLeft = selectedCycles
             while (cyclesLeft > 0) {
-                // --- INHALE (4s) ---
-                phase = "Inhale"
-                targetScale = 1.0f
-                if (hapticsEnabled) triggerVibration(context, "Inhale")
-                delay(4000)
-
-                // --- HOLD (7s) ---
+                phase = "Inhale"; targetScale = 1.0f
+                if (hapticsEnabled) triggerVibration(context, "Inhale"); delay(4000)
                 phase = "Hold"
-                if (hapticsEnabled) triggerVibration(context, "Hold")
-                delay(7000)
-
-                // --- EXHALE (8s) ---
-                phase = "Exhale"
-                targetScale = 0.6f
-                if (hapticsEnabled) triggerVibration(context, "Exhale")
-                delay(8000)
-
-                // --- HOLD (4s) ---
+                if (hapticsEnabled) triggerVibration(context, "Hold"); delay(7000)
+                phase = "Exhale"; targetScale = 0.6f
+                if (hapticsEnabled) triggerVibration(context, "Exhale"); delay(8000)
                 phase = "Hold"
-                if (hapticsEnabled) triggerVibration(context, "Hold")
-                delay(4000)
-
+                if (hapticsEnabled) triggerVibration(context, "Hold"); delay(4000)
                 cyclesLeft--
             }
-            isRunning = false
-            phase = "Done!"
+            isRunning = false; phase = "Done!"
             if (hapticsEnabled) triggerVibration(context, "Done")
-        } else {
-            phase = "Ready?"
-            targetScale = 0.6f
-        }
+        } else { phase = "Ready?"; targetScale = 0.6f }
     }
 
     Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 32.dp)) {
-            Text("Vibration Cues", style = MaterialTheme.typography.bodyLarge)
+            Text("Vibration Cues")
             Spacer(modifier = Modifier.width(12.dp))
             Switch(checked = hapticsEnabled, onCheckedChange = { hapticsEnabled = it })
         }
@@ -284,11 +232,21 @@ fun BreathingScreen() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun UrgeFlowScreen(db: AppDatabase) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var step by remember { mutableStateOf(FlowStep.CATEGORY) }
     var entry by remember { mutableStateOf(UrgeEntry()) }
+
+    var color1 by remember { mutableStateOf(getCustomColor(context, "color1", Color(0xFFEF5350))) }
+    var color2 by remember { mutableStateOf(getCustomColor(context, "color2", Color(0xFF42A5F5))) }
+    var color3 by remember { mutableStateOf(getCustomColor(context, "color3", Color(0xFF66BB6A))) }
+    var color4 by remember { mutableStateOf(getCustomColor(context, "color4", Color(0xFFFFEE58))) }
+    var showPicker by remember { mutableStateOf(false) }
+    var activeSlot by remember { mutableStateOf("") }
+
     val categories = listOf("Accepting", "Angry", "Sad", "Fear", "Stressed", "Joy")
     val specificEmotions = mapOf(
         "Accepting" to listOf("Calm", "Centered", "Content", "Forgiving", "Patient"),
@@ -317,92 +275,73 @@ fun UrgeFlowScreen(db: AppDatabase) {
                 }
             }
             FlowStep.COLOR -> {
-                Text("Give your emotion a color:", style = MaterialTheme.typography.headlineSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 24.dp)) {
-                    val colorMap = mapOf("Blue" to Color.Blue, "Green" to Color.Green, "Red" to Color.Red, "Yellow" to Color.Yellow)
-                    colorMap.forEach { (name, color) -> Box(modifier = Modifier.size(60.dp).clip(CircleShape).background(color).clickable { entry.emotionColor = name; step = FlowStep.LOVED }) }
+                Text("Pick a color", style = MaterialTheme.typography.headlineSmall)
+                Text("(Long press to edit)", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 32.dp)) {
+                    val slots = listOf("color1" to color1, "color2" to color2, "color3" to color3, "color4" to color4)
+                    slots.forEach { (key, col) ->
+                        Box(modifier = Modifier.size(70.dp).clip(CircleShape).background(col).combinedClickable(
+                            onClick = { entry.emotionColor = col.toHexString(); step = FlowStep.LOVED },
+                            onLongClick = { activeSlot = key; showPicker = true }
+                        ))
+                    }
+                }
+                if (showPicker) {
+                    ColorPickerDialog(onColorSelected = { newCol ->
+                        saveCustomColor(context, activeSlot, newCol)
+                        when(activeSlot) { "color1"->color1=newCol; "color2"->color2=newCol; "color3"->color3=newCol; "color4"->color4=newCol }
+                        showPicker = false
+                    }, onDismiss = { showPicker = false })
                 }
             }
-            FlowStep.LOVED -> QuestionTemplate("Felt loved today?", entry.feltLoved, { entry = entry.copy(feltLoved = it) }, { step = FlowStep.STRUGGLE_TODAY })
-            FlowStep.STRUGGLE_TODAY -> QuestionTemplate("Biggest struggle today?", entry.struggleToday, { entry = entry.copy(struggleToday = it) }, { step = FlowStep.STRUGGLE_WEEK })
-            FlowStep.STRUGGLE_WEEK -> QuestionTemplate("Biggest struggle this week?", entry.struggleWeek, { entry = entry.copy(struggleWeek = it) }, { step = FlowStep.EXCITEMENT })
-            FlowStep.EXCITEMENT -> QuestionTemplate("Excited for what?", entry.excitementWeek, { entry = entry.copy(excitementWeek = it) }, { scope.launch { db.urgeDao().insert(entry); step = FlowStep.COMPLETE } })
+            FlowStep.LOVED -> QuestionTemplate("Have you felt loved by someone today?", entry.feltLoved, { entry = entry.copy(feltLoved = it) }, { step = FlowStep.STRESS })
+            FlowStep.STRESS -> QuestionTemplate("What's causing you stress right now?", entry.stressReason, { entry = entry.copy(stressReason = it) }, { step = FlowStep.EXCITEMENT })
+            FlowStep.EXCITEMENT -> QuestionTemplate("What are you excited for this week?", entry.excitementWeek, { entry = entry.copy(excitementWeek = it) }, { scope.launch { db.urgeDao().insert(entry); step = FlowStep.COMPLETE } })
             FlowStep.COMPLETE -> {
                 Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(80.dp), tint = Color(0xFF4CAF50))
-                Text("Saved", style = MaterialTheme.typography.headlineSmall)
-                Button(onClick = { entry = UrgeEntry(); step = FlowStep.CATEGORY }) { Text("Restart") }
+                Text("Entry Saved", style = MaterialTheme.typography.headlineSmall)
+                Button(onClick = { entry = UrgeEntry(); step = FlowStep.CATEGORY }, modifier = Modifier.padding(top = 16.dp)) { Text("Restart") }
             }
         }
     }
 }
 
 @Composable
-fun JournalItem(entry: UrgeEntry, db: AppDatabase, initiallyExpanded: Boolean) {
-    var isExpanded by remember { mutableStateOf(initiallyExpanded) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val date = SimpleDateFormat("MMM dd, h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
-    val displayColor = when (entry.emotionColor) {
-        "Blue" -> Color(0xFF2196F3); "Green" -> Color(0xFF4CAF50); "Red" -> Color(0xFFF44336); "Yellow" -> Color(0xFFFFEB3B); else -> Color.Gray
-    }
-
-    if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete Entry?") },
-            text = { Text("This will permanently remove this journal entry.") },
-            confirmButton = { TextButton(onClick = { scope.launch { db.urgeDao().deleteEntry(entry) }; showDeleteConfirm = false }) { Text("Delete", color = Color.Red) } },
-            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") } }
-        )
-    }
-
-    Card(modifier = Modifier.fillMaxWidth().clickable { isExpanded = !isExpanded }, shape = RoundedCornerShape(16.dp)) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(displayColor))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(text = if (isExpanded) "${entry.category} (${entry.specificEmotion})" else entry.category, fontWeight = FontWeight.Bold)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(date, style = MaterialTheme.typography.labelMedium)
-                    IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Default.DeleteOutline, null, tint = Color.Red.copy(alpha = 0.6f)) }
-                }
-            }
-            if (isExpanded) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                JournalDetailRow("Loved:", entry.feltLoved)
-                JournalDetailRow("Today:", entry.struggleToday)
-                JournalDetailRow("Week:", entry.struggleWeek)
-                JournalDetailRow("Excited:", entry.excitementWeek)
-            }
+fun ColorPickerDialog(onColorSelected: (Color) -> Unit, onDismiss: () -> Unit) {
+    val shades = listOf(
+        Color(0xFFEF5350), Color(0xFFC62828), Color(0xFFAB47BC),
+        Color(0xFF42A5F5), Color(0xFF1565C0), Color(0xFF26C6DA),
+        Color(0xFF66BB6A), Color(0xFF2E7D32), Color(0xFFFFEE58),
+        Color(0xFFF9A825), Color(0xFF8D6E63), Color(0xFF212121)
+    )
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Customize Color") }, text = {
+        LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.height(250.dp)) {
+            items(shades) { col -> Box(modifier = Modifier.size(60.dp).padding(8.dp).clip(CircleShape).background(col).clickable { onColorSelected(col) }) }
         }
-    }
-}
-
-@Composable
-fun JournalDetailRow(label: String, value: String) {
-    if (value.isNotBlank()) {
-        Text(label, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-        Text(value, modifier = Modifier.padding(bottom = 8.dp))
-    }
+    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
 fun JournalScreen(db: AppDatabase) {
     val entries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
-    val weekInMs = 7 * 24 * 60 * 60 * 1000L
-    val now = System.currentTimeMillis()
-    val recent = entries.filter { (now - it.timestamp) < weekInMs }
-    val archive = entries.filter { (now - it.timestamp) >= weekInMs }
-
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Past 7 Days", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-        if (recent.isEmpty()) item { Text("No recent entries.", color = Color.Gray) }
-        else items(recent) { JournalItem(it, db, true) }
-        if (archive.isNotEmpty()) {
-            item { Text("Archive", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 24.dp)) }
-            items(archive) { JournalItem(it, db, false) }
+        item { Text("Journal History", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+        items(entries) { entry ->
+            val date = SimpleDateFormat("MMM dd, h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+            val col = try { Color(android.graphics.Color.parseColor(entry.emotionColor)) } catch(e: Exception) { Color.Gray }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(col))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("${entry.category}: ${entry.specificEmotion}", fontWeight = FontWeight.Bold)
+                    }
+                    Text(date, style = MaterialTheme.typography.labelSmall)
+                    if (entry.feltLoved.isNotBlank()) Text("Loved: ${entry.feltLoved}", style = MaterialTheme.typography.bodySmall)
+                    if (entry.stressReason.isNotBlank()) Text("Stress: ${entry.stressReason}", style = MaterialTheme.typography.bodySmall)
+                    if (entry.excitementWeek.isNotBlank()) Text("Excited: ${entry.excitementWeek}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
 }
@@ -410,48 +349,35 @@ fun JournalScreen(db: AppDatabase) {
 @Composable
 fun InsightsScreen(db: AppDatabase) {
     val entries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
-    val context = LocalContext.current
-    val streak = calculateStreak(entries)
-    val weekInMs = 7 * 24 * 60 * 60 * 1000L
-    val now = System.currentTimeMillis()
-    val recent = entries.filter { (now - it.timestamp) < weekInMs }
-    val colorCounts = recent.groupingBy { it.emotionColor }.eachCount()
-
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Your Stats", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            IconButton(onClick = { exportEntriesToCsv(context, entries) }) { Icon(Icons.Default.Share, "Export", tint = MaterialTheme.colorScheme.primary) }
-        }
-        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
-            Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.LocalFireDepartment, null, tint = Color(0xFFFF5722), modifier = Modifier.size(40.dp))
-                Column(modifier = Modifier.padding(start = 16.dp)) {
-                    Text("$streak Day Streak", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("Stay consistent!")
-                }
-            }
-        }
-        if (recent.isNotEmpty()) {
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text("Color Balance (Last 7 Days)", fontWeight = FontWeight.Bold)
-                    Row(modifier = Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(15.dp)).padding(top = 8.dp)) {
-                        listOf("Red", "Blue", "Green", "Yellow").forEach { name ->
-                            val count = colorCounts[name] ?: 0
-                            if (count > 0) Box(modifier = Modifier.fillMaxHeight().weight(count.toFloat()).background(when(name){"Red"->Color.Red;"Blue"->Color.Blue;"Green"->Color.Green;else->Color.Yellow}))
-                        }
-                    }
-                }
+    Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Insights", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(24.dp))
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.LocalFireDepartment, null, tint = Color.Red, modifier = Modifier.size(48.dp))
+                Text("Current Streak", style = MaterialTheme.typography.titleLarge)
+                Text("${calculateStreak(entries)} Days", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.ExtraBold)
             }
         }
     }
 }
 
+fun calculateStreak(entries: List<UrgeEntry>): Int {
+    if (entries.isEmpty()) return 0
+    val today = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
+    val uniqueDays = entries.map { Calendar.getInstance().apply { timeInMillis = it.timestamp; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis }.distinct().sortedDescending()
+    var streak = 0
+    val firstDay = uniqueDays.firstOrNull() ?: return 0
+    var checkDate = if (firstDay == today) today else if (firstDay == today - 86400000L) today - 86400000L else return 0
+    for (day in uniqueDays) { if (day == checkDate) { streak++; checkDate -= 86400000L } else break }
+    return streak
+}
+
 @Composable
 fun QuestionTemplate(q: String, v: String, onV: (String) -> Unit, onN: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(q, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-        OutlinedTextField(value = v, onValueChange = onV, modifier = Modifier.fillMaxWidth().height(200.dp).padding(top = 16.dp))
+        Text(q, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+        OutlinedTextField(value = v, onValueChange = onV, modifier = Modifier.fillMaxWidth().height(150.dp).padding(top = 16.dp))
         Button(onClick = onN, modifier = Modifier.padding(top = 24.dp)) { Text("Continue") }
     }
 }
@@ -462,32 +388,40 @@ fun DailyQuoteSection(db: AppDatabase) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showDialog by remember { mutableStateOf(false) }
-    var newQuoteText by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf("") }
+
     val dailyQuote = remember(quotes) {
         val prefs = context.getSharedPreferences("daily_quote_prefs", Context.MODE_PRIVATE)
         val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
-        val savedDate = prefs.getString("last_date", "")
-        val savedQuote = prefs.getString("last_quote", "")
-        if (quotes.isEmpty()) "Add a quote to inspire your day."
-        else if (savedDate == today && !savedQuote.isNullOrEmpty() && quotes.any { it.text == savedQuote }) savedQuote
-        else {
-            val picked = quotes.randomOrNull()?.text ?: "Add a quote to inspire your day."
+        val lastDate = prefs.getString("last_date", "")
+        val lastQuote = prefs.getString("last_quote", "")
+
+        if (quotes.isEmpty()) {
+            "Add a quote to inspire your day."
+        } else if (lastDate == today && !lastQuote.isNullOrEmpty() && quotes.any { it.text == lastQuote }) {
+            lastQuote
+        } else {
+            val picked = quotes.random().text
             prefs.edit().putString("last_date", today).putString("last_quote", picked).apply()
             picked
         }
     }
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = "\"$dailyQuote\"", fontSize = 20.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(horizontal = 24.dp))
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 32.dp)) {
+        Text("\"$dailyQuote\"", fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
         Row {
-            IconButton(onClick = { showDialog = true }) { Icon(Icons.Default.AddCircleOutline, null, tint = MaterialTheme.colorScheme.primary) }
+            IconButton(onClick = { showDialog = true }) { Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary) }
             if (quotes.isNotEmpty() && dailyQuote != "Add a quote to inspire your day.") {
-                IconButton(onClick = { scope.launch { quotes.find { it.text == dailyQuote }?.let { db.urgeDao().deleteQuote(it); context.getSharedPreferences("daily_quote_prefs", Context.MODE_PRIVATE).edit().remove("last_quote").apply() } } }) {
-                    Icon(Icons.Default.DeleteSweep, null, tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
-                }
+                IconButton(onClick = {
+                    scope.launch {
+                        quotes.find { it.text == dailyQuote }?.let { db.urgeDao().deleteQuote(it) }
+                        context.getSharedPreferences("daily_quote_prefs", Context.MODE_PRIVATE).edit().remove("last_quote").apply()
+                    }
+                }) { Icon(Icons.Default.DeleteSweep, null, tint = Color.Red.copy(alpha = 0.4f)) }
             }
         }
     }
     if (showDialog) {
-        AlertDialog(onDismissRequest = { showDialog = false }, title = { Text("Add Inspiration") }, text = { OutlinedTextField(value = newQuoteText, onValueChange = { newQuoteText = it }) }, confirmButton = { TextButton(onClick = { if (newQuoteText.isNotBlank()) { scope.launch { db.urgeDao().insertQuote(Quote(text = newQuoteText)); newQuoteText = ""; showDialog = false } } }) { Text("Save") } })
+        AlertDialog(onDismissRequest = { showDialog = false }, title = { Text("Add Quote") }, text = { OutlinedTextField(value = text, onValueChange = { text = it }) }, confirmButton = { TextButton(onClick = { scope.launch { if(text.isNotBlank()) db.urgeDao().insertQuote(Quote(text = text)); text = ""; showDialog = false } }) { Text("Save") } })
     }
 }
