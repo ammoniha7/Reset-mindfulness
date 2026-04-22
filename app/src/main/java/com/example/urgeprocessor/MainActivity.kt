@@ -1,6 +1,14 @@
 package com.example.urgeprocessor
 
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.widget.Toast
+import androidx.compose.ui.text.font.FontWeight as ComposeFontWeight // Alias to avoid conflict
+import androidx.compose.ui.text.withStyle
 import android.os.*
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -54,19 +62,35 @@ data class UrgeEntry(
 @Entity(tableName = "quotes")
 data class Quote(@PrimaryKey(autoGenerate = true) val id: Int = 0, val text: String)
 
+// NEW: Entity for the standard freeform journal
+@Entity(tableName = "standard_journal")
+data class StandardJournalEntry(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+    val content: String
+)
+
 @Dao
 interface UrgeDao {
     @Insert suspend fun insert(entry: UrgeEntry): Long
     @Query("SELECT * FROM urge_entries ORDER BY timestamp DESC")
     fun getAllEntries(): kotlinx.coroutines.flow.Flow<List<UrgeEntry>>
     @Delete suspend fun deleteEntry(entry: UrgeEntry): Int
+
     @Insert suspend fun insertQuote(quote: Quote): Long
     @Query("SELECT * FROM quotes")
     fun getAllQuotes(): kotlinx.coroutines.flow.Flow<List<Quote>>
     @Delete suspend fun deleteQuote(quote: Quote): Int
+
+    @Insert suspend fun insertStandardJournal(entry: StandardJournalEntry): Long
+    @Query("SELECT * FROM standard_journal ORDER BY timestamp DESC")
+    fun getAllStandardJournals(): kotlinx.coroutines.flow.Flow<List<StandardJournalEntry>>
+    // NEW: Added ability to delete standard journals
+    @Delete suspend fun deleteStandardJournal(entry: StandardJournalEntry): Int
 }
 
-@Database(entities = [UrgeEntry::class, Quote::class], version = 4)
+// Bumped version to 5 and added the new entity
+@Database(entities = [UrgeEntry::class, Quote::class, StandardJournalEntry::class], version = 5)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun urgeDao(): UrgeDao
     companion object {
@@ -140,8 +164,8 @@ class MainActivity : ComponentActivity() {
                             when (currentDest) {
                                 AppDestinations.FLOW -> UrgeFlowScreen(db)
                                 AppDestinations.BREATHE -> BreathingScreen()
-                                AppDestinations.JOURNAL -> JournalScreen(db)
-                                AppDestinations.STATS -> InsightsScreen(db)
+                                AppDestinations.RECORDS -> RecordsScreen(db)
+                                AppDestinations.JOURNAL -> StandardJournalScreen(db)
                             }
                         }
                     }
@@ -151,11 +175,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// Updated Nav Bar Enums
 enum class AppDestinations(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     FLOW("Urge Flow", Icons.Default.Psychology),
     BREATHE("Breathe", Icons.Default.Air),
-    JOURNAL("Journal", Icons.Default.EditNote),
-    STATS("Insights", Icons.Default.Insights)
+    RECORDS("Records", Icons.Default.LibraryBooks),
+    JOURNAL("Journal", Icons.Default.EditNote)
 }
 
 enum class FlowStep { CATEGORY, SPECIFIC, COLOR, LOVED, STRESS, EXCITEMENT, COMPLETE }
@@ -240,6 +265,9 @@ fun UrgeFlowScreen(db: AppDatabase) {
     var step by remember { mutableStateOf(FlowStep.CATEGORY) }
     var entry by remember { mutableStateOf(UrgeEntry()) }
 
+    // Collecting entries here so we can calculate the streak
+    val entries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
+
     var color1 by remember { mutableStateOf(getCustomColor(context, "color1", Color(0xFFEF5350))) }
     var color2 by remember { mutableStateOf(getCustomColor(context, "color2", Color(0xFF42A5F5))) }
     var color3 by remember { mutableStateOf(getCustomColor(context, "color3", Color(0xFF66BB6A))) }
@@ -265,7 +293,22 @@ fun UrgeFlowScreen(db: AppDatabase) {
                 LazyVerticalGrid(columns = GridCells.Fixed(2), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.heightIn(max = 300.dp)) {
                     items(categories) { cat -> Button(onClick = { entry.category = cat; step = FlowStep.SPECIFIC }, modifier = Modifier.height(60.dp)) { Text(cat) } }
                 }
+
                 DailyQuoteSection(db)
+
+                // Moved Streak Counter
+                Spacer(modifier = Modifier.height(24.dp))
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.LocalFireDepartment, contentDescription = "Streak", tint = Color.Red, modifier = Modifier.size(28.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Current Streak: ${calculateStreak(entries)} Days", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
             FlowStep.SPECIFIC -> {
                 Text("Be more specific:", style = MaterialTheme.typography.headlineSmall)
@@ -321,44 +364,191 @@ fun ColorPickerDialog(onColorSelected: (Color) -> Unit, onDismiss: () -> Unit) {
     }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
+// Renamed from JournalScreen to RecordsScreen
 @Composable
-fun JournalScreen(db: AppDatabase) {
+fun RecordsScreen(db: AppDatabase) {
     val entries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var entryToDelete by remember { mutableStateOf<UrgeEntry?>(null) }
+
+    // Calculate the cutoff for one week ago (7 days * 24h * 60m * 60s * 1000ms)
+    val oneWeekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
+
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Journal History", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Urge Records", style = MaterialTheme.typography.headlineMedium, fontWeight = ComposeFontWeight.Bold)
+                IconButton(onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val textToCopy = entries.joinToString("\n\n") { entry ->
+                        val date = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                        "$date\nCategory: ${entry.category} (${entry.specificEmotion})\nLoved: ${entry.feltLoved}\nStress: ${entry.stressReason}\nExcited: ${entry.excitementWeek}"
+                    }
+                    val clip = ClipData.newPlainText("Urge Records", textToCopy)
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(context, "Records copied to clipboard", Toast.LENGTH_SHORT).show()
+                }) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy All")
+                }
+            }
+        }
+
         items(entries) { entry ->
+            // UPDATED: Initial state depends on whether the entry is newer than one week
+            var expanded by remember { mutableStateOf(entry.timestamp > oneWeekAgo) }
+
             val date = SimpleDateFormat("MMM dd, h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
             val col = try { Color(android.graphics.Color.parseColor(entry.emotionColor)) } catch(e: Exception) { Color.Gray }
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(col))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("${entry.category}: ${entry.specificEmotion}", fontWeight = FontWeight.Bold)
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+            ) {
+                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(col))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("${entry.category}: ${entry.specificEmotion}", fontWeight = ComposeFontWeight.Bold)
+                        }
+                        Text(date, style = MaterialTheme.typography.labelSmall)
+
+                        if (expanded) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val labels = listOf("Loved: " to entry.feltLoved, "Stress: " to entry.stressReason, "Excited: " to entry.excitementWeek)
+                            labels.forEach { (label, value) ->
+                                if (value.isNotBlank()) {
+                                    Text(
+                                        buildAnnotatedString {
+                                            withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
+                                            append(value)
+                                        },
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Text(date, style = MaterialTheme.typography.labelSmall)
-                    if (entry.feltLoved.isNotBlank()) Text("Loved: ${entry.feltLoved}", style = MaterialTheme.typography.bodySmall)
-                    if (entry.stressReason.isNotBlank()) Text("Stress: ${entry.stressReason}", style = MaterialTheme.typography.bodySmall)
-                    if (entry.excitementWeek.isNotBlank()) Text("Excited: ${entry.excitementWeek}", style = MaterialTheme.typography.bodySmall)
+                    IconButton(onClick = { entryToDelete = entry }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Entry", tint = Color.Red.copy(alpha = 0.5f))
+                    }
                 }
             }
         }
     }
+
+    if (entryToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { entryToDelete = null },
+            title = { Text("Delete Record?") },
+            text = { Text("This will permanently remove this urge entry from your history.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        entryToDelete?.let { db.urgeDao().deleteEntry(it) }
+                        entryToDelete = null
+                    }
+                }) { Text("Delete", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { entryToDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
+// NEW: Standard Journal Screen
 @Composable
-fun InsightsScreen(db: AppDatabase) {
-    val entries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Insights", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(24.dp))
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.LocalFireDepartment, null, tint = Color.Red, modifier = Modifier.size(48.dp))
-                Text("Current Streak", style = MaterialTheme.typography.titleLarge)
-                Text("${calculateStreak(entries)} Days", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.ExtraBold)
+fun StandardJournalScreen(db: AppDatabase) {
+    val entries by db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList())
+    val context = LocalContext.current
+    var text by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    var journalToDelete by remember { mutableStateOf<StandardJournalEntry?>(null) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Daily Journal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+
+            // Copy to Clipboard Button
+            IconButton(onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val textToCopy = entries.joinToString("\n\n") { entry ->
+                    val date = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                    "$date\n${entry.content}"
+                }
+                val clip = android.content.ClipData.newPlainText("Journal Entries", textToCopy)
+                clipboard.setPrimaryClip(clip)
+                android.widget.Toast.makeText(context, "Journal copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+            }) {
+                Icon(Icons.Default.ContentCopy, contentDescription = "Copy All")
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // ... (The rest of your Journal UI code: Textfield, Button, and LazyColumn)
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier.fillMaxWidth().height(150.dp),
+            placeholder = { Text("Write your thoughts here...") },
+            shape = RoundedCornerShape(12.dp)
+        )
+
+        Button(
+            onClick = {
+                if (text.isNotBlank()) {
+                    scope.launch {
+                        db.urgeDao().insertStandardJournal(StandardJournalEntry(content = text))
+                        text = ""
+                    }
+                }
+            },
+            modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
+        ) { Text("Save Entry") }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(entries) { entry ->
+                val date = SimpleDateFormat("MMM dd, yyyy \u2022 h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(date, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(entry.content, style = MaterialTheme.typography.bodyLarge)
+                        }
+                        IconButton(onClick = { journalToDelete = entry }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Journal", tint = Color.Red.copy(alpha = 0.5f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (journalToDelete != null) {
+        // ... (Existing AlertDialog code)
+        AlertDialog(
+            onDismissRequest = { journalToDelete = null },
+            title = { Text("Delete Journal Entry?") },
+            text = { Text("Are you sure you want to delete this thought? This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        journalToDelete?.let { db.urgeDao().deleteStandardJournal(it) }
+                        journalToDelete = null
+                    }
+                }) { Text("Delete", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { journalToDelete = null }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -421,7 +611,38 @@ fun DailyQuoteSection(db: AppDatabase) {
             }
         }
     }
+
     if (showDialog) {
-        AlertDialog(onDismissRequest = { showDialog = false }, title = { Text("Add Quote") }, text = { OutlinedTextField(value = text, onValueChange = { text = it }) }, confirmButton = { TextButton(onClick = { scope.launch { if(text.isNotBlank()) db.urgeDao().insertQuote(Quote(text = text)); text = ""; showDialog = false } }) { Text("Save") } })
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Bulk Add Quotes") },
+            text = {
+                Column {
+                    Text("Separate quotes with |", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        placeholder = { Text("Quote 1 | Quote 2 | ...") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        if(text.isNotBlank()) {
+                            val rawList = text.split("|")
+                            val cleanQuotes = rawList.map { it.trim() }.filter { it.isNotEmpty() }
+                            cleanQuotes.forEach { quoteText ->
+                                db.urgeDao().insertQuote(Quote(text = quoteText))
+                            }
+                            android.widget.Toast.makeText(context, "Added ${cleanQuotes.size} quotes!", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        text = ""
+                        showDialog = false
+                    }
+                }) { Text("Save All") }
+            }
+        )
     }
 }
