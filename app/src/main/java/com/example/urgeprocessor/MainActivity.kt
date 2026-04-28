@@ -1,6 +1,8 @@
 package com.example.urgeprocessor
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import android.content.ClipData
@@ -495,7 +497,8 @@ fun StandardJournalScreen(db: AppDatabase) {
             onValueChange = { text = it },
             modifier = Modifier.fillMaxWidth().height(150.dp),
             placeholder = { Text("Write your thoughts here...") },
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(12.dp),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
         )
 
         Button(
@@ -567,7 +570,12 @@ fun calculateStreak(entries: List<UrgeEntry>): Int {
 fun QuestionTemplate(q: String, v: String, onV: (String) -> Unit, onN: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(q, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
-        OutlinedTextField(value = v, onValueChange = onV, modifier = Modifier.fillMaxWidth().height(150.dp).padding(top = 16.dp))
+        OutlinedTextField(
+            value = v,
+            onValueChange = onV,
+            modifier = Modifier.fillMaxWidth().height(150.dp).padding(top = 16.dp),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+        )
         Button(onClick = onN, modifier = Modifier.padding(top = 24.dp)) { Text("Continue") }
     }
 }
@@ -623,7 +631,8 @@ fun DailyQuoteSection(db: AppDatabase) {
                         value = text,
                         onValueChange = { text = it },
                         placeholder = { Text("Quote 1 | Quote 2 | ...") },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
                     )
                 }
             },
