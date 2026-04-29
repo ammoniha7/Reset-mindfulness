@@ -337,14 +337,72 @@ fun UrgeFlowScreen(db: AppDatabase) {
                 // Moved Streak Counter
                 Spacer(modifier = Modifier.height(24.dp))
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.LocalFireDepartment, contentDescription = "Streak", tint = Color.Red, modifier = Modifier.size(28.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Current Streak: ${calculateStreak(entries)} Days", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.LocalFireDepartment, contentDescription = "Streak", tint = Color.Red, modifier = Modifier.size(28.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Current Streak: ${calculateStreak(entries)} Days", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // New Processed Successfully Counter
+                        var processedCount by remember {
+                            val prefs = context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE)
+                            mutableIntStateOf(prefs.getInt("processed_count", 0))
+                        }
+
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text("Processed Successfully", style = MaterialTheme.typography.bodyLarge)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(onClick = {
+                                    if (processedCount > 0) {
+                                        processedCount--
+                                        context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE).edit().putInt("processed_count", processedCount).apply()
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Decrease", tint = MaterialTheme.colorScheme.primary)
+                                }
+                                IconButton(onClick = {
+                                    processedCount++
+                                    context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE).edit().putInt("processed_count", processedCount).apply()
+                                }) {
+                                    Icon(Icons.Default.Add, contentDescription = "Increase", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                            
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = processedCount.toString(),
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = "Reset",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.clickable {
+                                        processedCount = 0
+                                        context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE).edit().putInt("processed_count", 0).apply()
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
