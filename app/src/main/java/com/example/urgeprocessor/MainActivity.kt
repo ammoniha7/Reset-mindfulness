@@ -186,6 +186,7 @@ enum class AppDestinations(val label: String, val icon: androidx.compose.ui.grap
 }
 
 enum class FlowStep { CATEGORY, SPECIFIC, COLOR, LOVED, STRESS, EXCITEMENT, COMPLETE }
+enum class JournalView { LIST, CALENDAR }
 
 // --- SCREENS ---
 
@@ -465,68 +466,87 @@ fun RecordsScreen(db: AppDatabase) {
 @Composable
 fun StandardJournalScreen(db: AppDatabase) {
     val entries by db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList())
+    val urgeEntries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
+    var currentView by rememberSaveable { mutableStateOf(JournalView.LIST) }
+    var selectedDate by remember { mutableStateOf<Date?>(null) }
+    
     val context = LocalContext.current
     var text by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     var journalToDelete by remember { mutableStateOf<StandardJournalEntry?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Daily Journal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-
-            // Copy to Clipboard Button
-            IconButton(onClick = {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val textToCopy = entries.joinToString("\n\n") { entry ->
-                    val date = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
-                    "$date\n${entry.content}"
-                }
-                val clip = android.content.ClipData.newPlainText("Journal Entries", textToCopy)
-                clipboard.setPrimaryClip(clip)
-                android.widget.Toast.makeText(context, "Journal copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
-            }) {
-                Icon(Icons.Default.ContentCopy, contentDescription = "Copy All")
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // ... (The rest of your Journal UI code: Textfield, Button, and LazyColumn)
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            modifier = Modifier.fillMaxWidth().height(150.dp),
-            placeholder = { Text("Write your thoughts here...") },
-            shape = RoundedCornerShape(12.dp),
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+    if (currentView == JournalView.CALENDAR) {
+        JournalCalendarView(
+            journalEntries = entries,
+            urgeEntries = urgeEntries,
+            onBack = { currentView = JournalView.LIST },
+            onDayClick = { selectedDate = it }
         )
+    } else {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Daily Journal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
-        Button(
-            onClick = {
-                if (text.isNotBlank()) {
-                    scope.launch {
-                        db.urgeDao().insertStandardJournal(StandardJournalEntry(content = text))
-                        text = ""
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { currentView = JournalView.CALENDAR }) {
+                        Icon(Icons.Default.CalendarMonth, null)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Calendar")
+                    }
+                    // Copy to Clipboard Button
+                    IconButton(onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val textToCopy = entries.joinToString("\n\n") { entry ->
+                            val date = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                            "$date\n${entry.content}"
+                        }
+                        val clip = android.content.ClipData.newPlainText("Journal Entries", textToCopy)
+                        clipboard.setPrimaryClip(clip)
+                        android.widget.Toast.makeText(context, "Journal copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy All")
                     }
                 }
-            },
-            modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
-        ) { Text("Save Entry") }
+            }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(entries) { entry ->
-                val date = SimpleDateFormat("MMM dd, yyyy \u2022 h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(date, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(entry.content, style = MaterialTheme.typography.bodyLarge)
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth().height(150.dp),
+                placeholder = { Text("Write your thoughts here...") },
+                shape = RoundedCornerShape(12.dp),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+            )
+
+            Button(
+                onClick = {
+                    if (text.isNotBlank()) {
+                        scope.launch {
+                            db.urgeDao().insertStandardJournal(StandardJournalEntry(content = text))
+                            text = ""
                         }
-                        IconButton(onClick = { journalToDelete = entry }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete Journal", tint = Color.Red.copy(alpha = 0.5f))
+                    }
+                },
+                modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
+            ) { Text("Save Entry") }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(entries) { entry ->
+                    val date = SimpleDateFormat("MMM dd, yyyy \u2022 h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(date, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(entry.content, style = MaterialTheme.typography.bodyLarge)
+                            }
+                            IconButton(onClick = { journalToDelete = entry }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Journal", tint = Color.Red.copy(alpha = 0.5f))
+                            }
                         }
                     }
                 }
@@ -534,8 +554,16 @@ fun StandardJournalScreen(db: AppDatabase) {
         }
     }
 
+    if (selectedDate != null) {
+        DayEntriesDialog(
+            date = selectedDate!!,
+            journalEntries = entries,
+            urgeEntries = urgeEntries,
+            onDismiss = { selectedDate = null }
+        )
+    }
+
     if (journalToDelete != null) {
-        // ... (Existing AlertDialog code)
         AlertDialog(
             onDismissRequest = { journalToDelete = null },
             title = { Text("Delete Journal Entry?") },
@@ -553,6 +581,198 @@ fun StandardJournalScreen(db: AppDatabase) {
             }
         )
     }
+}
+
+// --- CALENDAR COMPONENTS ---
+
+@Composable
+fun JournalCalendarView(
+    journalEntries: List<StandardJournalEntry>,
+    urgeEntries: List<UrgeEntry>,
+    onBack: () -> Unit,
+    onDayClick: (Date) -> Unit
+) {
+    var calendar by remember { mutableStateOf(Calendar.getInstance()) }
+    val monthYearFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            }
+            Text(monthYearFormat.format(calendar.time), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Row {
+                IconButton(onClick = {
+                    val newCal = calendar.clone() as Calendar
+                    newCal.add(Calendar.MONTH, -1)
+                    calendar = newCal
+                }) {
+                    Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Month")
+                }
+                IconButton(onClick = {
+                    val newCal = calendar.clone() as Calendar
+                    newCal.add(Calendar.MONTH, 1)
+                    calendar = newCal
+                }) {
+                    Icon(Icons.Default.ChevronRight, contentDescription = "Next Month")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Days of week header
+        Row(modifier = Modifier.fillMaxWidth()) {
+            val days = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+            days.forEach { day ->
+                Text(
+                    text = day,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.Gray
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Calendar Grid
+        val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
+        val firstDayOfMonth = (calendar.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
+        val startOffset = firstDayOfMonth.get(Calendar.DAY_OF_WEEK) - 1
+
+        val totalSlots = 42
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(7),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(totalSlots) { index ->
+                val dayNum = index - startOffset + 1
+                if (dayNum in 1..daysInMonth) {
+                    val currentDayCal = (calendar.clone() as Calendar).apply {
+                        set(Calendar.DAY_OF_MONTH, dayNum)
+                        set(Calendar.HOUR_OF_DAY, 0)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    val startTime = currentDayCal.timeInMillis
+                    val endTime = startTime + 24 * 60 * 60 * 1000L
+
+                    val hasJournal = journalEntries.any { it.timestamp in startTime until endTime }
+                    val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
+
+                    val bgColor = when {
+                        hasJournal && hasUrge -> Color(0xFFAB47BC) // Purple
+                        hasJournal -> Color(0xFF42A5F5) // Blue
+                        hasUrge -> Color(0xFF66BB6A) // Green
+                        else -> Color.Transparent
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .padding(4.dp)
+                            .clip(CircleShape)
+                            .background(bgColor)
+                            .clickable { onDayClick(currentDayCal.time) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = dayNum.toString(),
+                            fontWeight = if (bgColor != Color.Transparent) FontWeight.Bold else FontWeight.Normal,
+                            color = if (bgColor != Color.Transparent) Color.White else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                } else {
+                    Box(modifier = Modifier.aspectRatio(1f))
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // Legend
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LegendItem(Color(0xFF42A5F5), "Journal Entry")
+            LegendItem(Color(0xFF66BB6A), "Urge Flow Entry")
+            LegendItem(Color(0xFFAB47BC), "Both Entries")
+        }
+    }
+}
+
+@Composable
+fun LegendItem(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(color))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+fun DayEntriesDialog(
+    date: Date,
+    journalEntries: List<StandardJournalEntry>,
+    urgeEntries: List<UrgeEntry>,
+    onDismiss: () -> Unit
+) {
+    val dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
+    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+    val startTime = Calendar.getInstance().apply {
+        time = date
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val endTime = startTime + 24 * 60 * 60 * 1000L
+
+    val dayJournals = journalEntries.filter { it.timestamp in startTime until endTime }
+    val dayUrges = urgeEntries.filter { it.timestamp in startTime until endTime }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(dateFormat.format(date)) },
+        text = {
+            LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                if (dayJournals.isNotEmpty()) {
+                    item { Text("Journal Entries", fontWeight = FontWeight.Bold, color = Color(0xFF42A5F5), modifier = Modifier.padding(vertical = 8.dp)) }
+                    items(dayJournals) { entry ->
+                        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF42A5F5).copy(alpha = 0.1f))) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = Color(0xFF1565C0))
+                                Text(entry.content, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+                if (dayUrges.isNotEmpty()) {
+                    item { Text("Urge Flow Entries", fontWeight = FontWeight.Bold, color = Color(0xFF66BB6A), modifier = Modifier.padding(vertical = 8.dp)) }
+                    items(dayUrges) { entry ->
+                        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF66BB6A).copy(alpha = 0.1f))) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                                Text("${entry.category}: ${entry.specificEmotion}", fontWeight = FontWeight.Bold)
+                                Text("Loved: ${entry.feltLoved}", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+                if (dayJournals.isEmpty() && dayUrges.isEmpty()) {
+                    item { Text("No entries for this day.") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
 }
 
 fun calculateStreak(entries: List<UrgeEntry>): Int {
