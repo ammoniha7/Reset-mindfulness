@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight as ComposeFontWeight // Alias to
 import androidx.compose.ui.text.withStyle
 import android.os.*
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.animateColorAsState
@@ -152,11 +153,25 @@ class MainActivity : ComponentActivity() {
         val db = AppDatabase.getDatabase(this)
         enableEdgeToEdge()
         setContent {
-            UrgeProcessorTheme {
+            val context = LocalContext.current
+            val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
+            var isDarkMode by rememberSaveable { mutableStateOf(prefs.getBoolean("dark_mode", false)) }
+            
+            LaunchedEffect(isDarkMode) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (isDarkMode) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                    }
+                )
+            }
+            
+            UrgeProcessorTheme(darkTheme = isDarkMode) {
                 var currentDest by rememberSaveable { mutableStateOf(AppDestinations.FLOW) }
                 NavigationSuiteScaffold(
                     navigationSuiteItems = {
-                        AppDestinations.entries.forEach {
+                        AppDestinations.entries.filter { it.showInNavBar }.forEach {
                             item(icon = { Icon(it.icon, null) }, label = { Text(it.label) }, selected = it == currentDest, onClick = { currentDest = it })
                         }
                     }
@@ -164,10 +179,18 @@ class MainActivity : ComponentActivity() {
                     Scaffold { innerPadding ->
                         Box(modifier = Modifier.padding(innerPadding)) {
                             when (currentDest) {
-                                AppDestinations.FLOW -> UrgeFlowScreen(db)
+                                AppDestinations.FLOW -> UrgeFlowScreen(db, onNavigateToSettings = { currentDest = AppDestinations.SETTINGS })
                                 AppDestinations.BREATHE -> BreathingScreen()
                                 AppDestinations.RECORDS -> RecordsScreen(db)
                                 AppDestinations.JOURNAL -> StandardJournalScreen(db)
+                                AppDestinations.SETTINGS -> SettingsScreen(
+                                    isDarkMode = isDarkMode,
+                                    onDarkModeChange = { 
+                                        isDarkMode = it
+                                        prefs.edit().putBoolean("dark_mode", it).apply()
+                                    },
+                                    onBack = { currentDest = AppDestinations.FLOW }
+                                )
                             }
                         }
                     }
@@ -178,11 +201,12 @@ class MainActivity : ComponentActivity() {
 }
 
 // Updated Nav Bar Enums
-enum class AppDestinations(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+enum class AppDestinations(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val showInNavBar: Boolean = true) {
     FLOW("Urge Flow", Icons.Default.Psychology),
     BREATHE("Breathe", Icons.Default.Air),
     RECORDS("Records", Icons.Default.LibraryBooks),
-    JOURNAL("Journal", Icons.Default.EditNote)
+    JOURNAL("Journal", Icons.Default.EditNote),
+    SETTINGS("Settings", Icons.Default.Settings, false)
 }
 
 enum class FlowStep { CATEGORY, SPECIFIC, COLOR, LOVED, STRESS, EXCITEMENT, COMPLETE }
@@ -297,7 +321,7 @@ fun BreathingScreen() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun UrgeFlowScreen(db: AppDatabase) {
+fun UrgeFlowScreen(db: AppDatabase, onNavigateToSettings: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var step by remember { mutableStateOf(FlowStep.CATEGORY) }
@@ -323,9 +347,10 @@ fun UrgeFlowScreen(db: AppDatabase) {
         "Joy" to listOf("Bliss", "Vibrant", "Grateful", "Inspired", "Playful")
     )
 
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(modifier = Modifier.height(40.dp))
-        when (step) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(modifier = Modifier.height(40.dp))
+            when (step) {
             FlowStep.CATEGORY -> {
                 Text("How are you feeling?", style = MaterialTheme.typography.headlineMedium); Spacer(modifier = Modifier.height(30.dp))
                 LazyVerticalGrid(columns = GridCells.Fixed(2), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.heightIn(max = 300.dp)) {
@@ -443,6 +468,15 @@ fun UrgeFlowScreen(db: AppDatabase) {
             }
         }
     }
+
+    // Settings Gear Icon at Top Right - Placed AFTER Column in Box so it's on top
+    IconButton(
+        onClick = onNavigateToSettings,
+        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
+    ) {
+        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.primary)
+    }
+}
 }
 
 @Composable
@@ -866,6 +900,35 @@ fun DayEntriesDialog(
             TextButton(onClick = onDismiss) { Text("Close") }
         }
     )
+}
+
+@Composable
+fun SettingsScreen(isDarkMode: Boolean, onDarkModeChange: (Boolean) -> Unit, onBack: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            }
+            Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.DarkMode, null)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("Dark Mode", style = MaterialTheme.typography.bodyLarge)
+                }
+                Switch(checked = isDarkMode, onCheckedChange = onDarkModeChange)
+            }
+        }
+    }
 }
 
 fun calculateStreak(entries: List<UrgeEntry>): Int {
