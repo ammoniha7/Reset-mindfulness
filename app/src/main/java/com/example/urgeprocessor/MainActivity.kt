@@ -160,6 +160,9 @@ class MainActivity : ComponentActivity() {
                 val colorInt = prefs.getInt("theme_color", -1)
                 mutableStateOf(if (colorInt == -1) null else Color(colorInt))
             }
+            var journalColor by remember { mutableStateOf(Color(prefs.getInt("calendar_journal_color", 0xFF42A5F5.toInt()))) }
+            var urgeColor by remember { mutableStateOf(Color(prefs.getInt("calendar_urge_color", 0xFF66BB6A.toInt()))) }
+            var bothColor by remember { mutableStateOf(Color(prefs.getInt("calendar_both_color", 0xFFAB47BC.toInt()))) }
             
             LaunchedEffect(isDarkMode) {
                 enableEdgeToEdge(
@@ -186,7 +189,7 @@ class MainActivity : ComponentActivity() {
                                 AppDestinations.FLOW -> UrgeFlowScreen(db, onNavigateToSettings = { currentDest = AppDestinations.SETTINGS })
                                 AppDestinations.BREATHE -> BreathingScreen()
                                 AppDestinations.RECORDS -> RecordsScreen(db)
-                                AppDestinations.JOURNAL -> StandardJournalScreen(db)
+                                AppDestinations.JOURNAL -> StandardJournalScreen(db, journalColor, urgeColor, bothColor)
                                 AppDestinations.SETTINGS -> SettingsScreen(
                                     isDarkMode = isDarkMode,
                                     onDarkModeChange = { 
@@ -201,6 +204,29 @@ class MainActivity : ComponentActivity() {
                                         } else {
                                             prefs.edit().remove("theme_color").apply()
                                         }
+                                    },
+                                    journalColor = journalColor,
+                                    onJournalColorChange = { 
+                                        journalColor = it
+                                        prefs.edit().putInt("calendar_journal_color", it.toArgb()).apply()
+                                    },
+                                    urgeColor = urgeColor,
+                                    onUrgeColorChange = { 
+                                        urgeColor = it
+                                        prefs.edit().putInt("calendar_urge_color", it.toArgb()).apply()
+                                    },
+                                    bothColor = bothColor,
+                                    onBothColorChange = { 
+                                        bothColor = it
+                                        prefs.edit().putInt("calendar_both_color", it.toArgb()).apply()
+                                    },
+                                    onResetCalendarColors = {
+                                        journalColor = Color(0xFF42A5F5)
+                                        urgeColor = Color(0xFF66BB6A)
+                                        bothColor = Color(0xFFAB47BC)
+                                        prefs.edit().remove("calendar_journal_color")
+                                            .remove("calendar_urge_color")
+                                            .remove("calendar_both_color").apply()
                                     },
                                     onBack = { currentDest = AppDestinations.FLOW }
                                 )
@@ -604,7 +630,7 @@ fun RecordsScreen(db: AppDatabase) {
 
 // NEW: Standard Journal Screen
 @Composable
-fun StandardJournalScreen(db: AppDatabase) {
+fun StandardJournalScreen(db: AppDatabase, journalColor: Color, urgeColor: Color, bothColor: Color) {
     val entries by db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList())
     val urgeEntries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
     var currentView by rememberSaveable { mutableStateOf(JournalView.LIST) }
@@ -619,6 +645,9 @@ fun StandardJournalScreen(db: AppDatabase) {
         JournalCalendarView(
             journalEntries = entries,
             urgeEntries = urgeEntries,
+            journalColor = journalColor,
+            urgeColor = urgeColor,
+            bothColor = bothColor,
             onBack = { currentView = JournalView.LIST },
             onDayClick = { selectedDate = it }
         )
@@ -699,6 +728,8 @@ fun StandardJournalScreen(db: AppDatabase) {
             date = selectedDate!!,
             journalEntries = entries,
             urgeEntries = urgeEntries,
+            journalColor = journalColor,
+            urgeColor = urgeColor,
             onDismiss = { selectedDate = null }
         )
     }
@@ -729,6 +760,9 @@ fun StandardJournalScreen(db: AppDatabase) {
 fun JournalCalendarView(
     journalEntries: List<StandardJournalEntry>,
     urgeEntries: List<UrgeEntry>,
+    journalColor: Color,
+    urgeColor: Color,
+    bothColor: Color,
     onBack: () -> Unit,
     onDayClick: (Date) -> Unit
 ) {
@@ -808,9 +842,9 @@ fun JournalCalendarView(
                     val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
 
                     val bgColor = when {
-                        hasJournal && hasUrge -> Color(0xFFAB47BC) // Purple
-                        hasJournal -> Color(0xFF42A5F5) // Blue
-                        hasUrge -> Color(0xFF66BB6A) // Green
+                        hasJournal && hasUrge -> bothColor
+                        hasJournal -> journalColor
+                        hasUrge -> urgeColor
                         else -> Color.Transparent
                     }
 
@@ -839,9 +873,9 @@ fun JournalCalendarView(
         
         // Legend
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            LegendItem(Color(0xFF42A5F5), "Journal Entry")
-            LegendItem(Color(0xFF66BB6A), "Urge Flow Entry")
-            LegendItem(Color(0xFFAB47BC), "Both Entries")
+            LegendItem(journalColor, "Journal Entry")
+            LegendItem(urgeColor, "Urge Flow Entry")
+            LegendItem(bothColor, "Both Entries")
         }
     }
 }
@@ -860,6 +894,8 @@ fun DayEntriesDialog(
     date: Date,
     journalEntries: List<StandardJournalEntry>,
     urgeEntries: List<UrgeEntry>,
+    journalColor: Color,
+    urgeColor: Color,
     onDismiss: () -> Unit
 ) {
     val dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
@@ -882,22 +918,22 @@ fun DayEntriesDialog(
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
                 if (dayJournals.isNotEmpty()) {
-                    item { Text("Journal Entries", fontWeight = FontWeight.Bold, color = Color(0xFF42A5F5), modifier = Modifier.padding(vertical = 8.dp)) }
+                    item { Text("Journal Entries", fontWeight = FontWeight.Bold, color = journalColor, modifier = Modifier.padding(vertical = 8.dp)) }
                     items(dayJournals) { entry ->
-                        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF42A5F5).copy(alpha = 0.1f))) {
+                        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = journalColor.copy(alpha = 0.1f))) {
                             Column(modifier = Modifier.padding(8.dp)) {
-                                Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = Color(0xFF1565C0))
+                                Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = journalColor)
                                 Text(entry.content, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
                 }
                 if (dayUrges.isNotEmpty()) {
-                    item { Text("Urge Flow Entries", fontWeight = FontWeight.Bold, color = Color(0xFF66BB6A), modifier = Modifier.padding(vertical = 8.dp)) }
+                    item { Text("Urge Flow Entries", fontWeight = FontWeight.Bold, color = urgeColor, modifier = Modifier.padding(vertical = 8.dp)) }
                     items(dayUrges) { entry ->
-                        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF66BB6A).copy(alpha = 0.1f))) {
+                        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = urgeColor.copy(alpha = 0.1f))) {
                             Column(modifier = Modifier.padding(8.dp)) {
-                                Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                                Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = urgeColor)
                                 Text("${entry.category}: ${entry.specificEmotion}", fontWeight = FontWeight.Bold)
                                 Text("Loved: ${entry.feltLoved}", style = MaterialTheme.typography.bodySmall)
                             }
@@ -921,9 +957,18 @@ fun SettingsScreen(
     onDarkModeChange: (Boolean) -> Unit,
     customThemeColor: Color?,
     onThemeColorChange: (Color?) -> Unit,
+    journalColor: Color,
+    onJournalColorChange: (Color) -> Unit,
+    urgeColor: Color,
+    onUrgeColorChange: (Color) -> Unit,
+    bothColor: Color,
+    onBothColorChange: (Color) -> Unit,
+    onResetCalendarColors: () -> Unit,
     onBack: () -> Unit
 ) {
     var showColorPicker by remember { mutableStateOf(false) }
+    var showCalendarPicker by remember { mutableStateOf(false) }
+    var pickingFor by remember { mutableStateOf("") } // "theme", "journal", "urge", "both"
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -953,7 +998,10 @@ fun SettingsScreen(
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).clickable { showColorPicker = true },
+                    modifier = Modifier.fillMaxWidth().padding(16.dp).clickable { 
+                        pickingFor = "theme"
+                        showColorPicker = true 
+                    },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -970,27 +1018,109 @@ fun SettingsScreen(
                             .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
                     )
                 }
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp).clickable { showCalendarPicker = true },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CalendarMonth, null)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Calendar Theme", style = MaterialTheme.typography.bodyLarge)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(journalColor))
+                        Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(urgeColor))
+                        Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(bothColor))
+                    }
+                }
             }
         }
     }
 
+    if (showCalendarPicker) {
+        AlertDialog(
+            onDismissRequest = { showCalendarPicker = false },
+            title = { Text("Calendar Colors") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CalendarColorRow("Journal Entry", journalColor) {
+                        pickingFor = "journal"
+                        showColorPicker = true
+                        showCalendarPicker = false
+                    }
+                    CalendarColorRow("Urge Flow Entry", urgeColor) {
+                        pickingFor = "urge"
+                        showColorPicker = true
+                        showCalendarPicker = false
+                    }
+                    CalendarColorRow("Both Entries", bothColor) {
+                        pickingFor = "both"
+                        showColorPicker = true
+                        showCalendarPicker = false
+                    }
+                    TextButton(onClick = {
+                        onResetCalendarColors()
+                        showCalendarPicker = false
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Reset to Default")
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showCalendarPicker = false }) { Text("Close") } }
+        )
+    }
+
     if (showColorPicker) {
         ThemeColorPickerDialog(
+            title = when(pickingFor) {
+                "journal" -> "Journal Entry Color"
+                "urge" -> "Urge Flow Color"
+                "both" -> "Both Entries Color"
+                else -> "App Theme Color"
+            },
             onColorSelected = { 
-                onThemeColorChange(it)
+                when(pickingFor) {
+                    "theme" -> onThemeColorChange(it)
+                    "journal" -> onJournalColorChange(it)
+                    "urge" -> onUrgeColorChange(it)
+                    "both" -> onBothColorChange(it)
+                }
                 showColorPicker = false
             },
             onReset = {
-                onThemeColorChange(null)
+                if (pickingFor == "theme") onThemeColorChange(null)
                 showColorPicker = false
             },
+            showReset = pickingFor == "theme",
             onDismiss = { showColorPicker = false }
         )
     }
 }
 
 @Composable
-fun ThemeColorPickerDialog(onColorSelected: (Color) -> Unit, onReset: () -> Unit, onDismiss: () -> Unit) {
+fun CalendarColorRow(label: String, color: Color, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label)
+        Box(modifier = Modifier.size(24.dp).clip(CircleShape).background(color).border(1.dp, Color.Gray, CircleShape))
+    }
+}
+
+@Composable
+fun ThemeColorPickerDialog(
+    title: String = "Choose App Theme Color",
+    showReset: Boolean = true,
+    onColorSelected: (Color) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit
+) {
     val themeColors = listOf(
         Color(0xFFEF5350), Color(0xFFE91E63), Color(0xFF9C27B0),
         Color(0xFF673AB7), Color(0xFF3F51B5), Color(0xFF2196F3),
@@ -1001,7 +1131,7 @@ fun ThemeColorPickerDialog(onColorSelected: (Color) -> Unit, onReset: () -> Unit
     )
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choose App Theme Color") },
+        title = { Text(title) },
         text = {
             Column {
                 LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.height(200.dp)) {
@@ -1016,11 +1146,13 @@ fun ThemeColorPickerDialog(onColorSelected: (Color) -> Unit, onReset: () -> Unit
                         )
                     }
                 }
-                TextButton(
-                    onClick = onReset,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                ) {
-                    Text("Reset to Default")
+                if (showReset) {
+                    TextButton(
+                        onClick = onReset,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) {
+                        Text("Reset to Default")
+                    }
                 }
             }
         },
