@@ -156,6 +156,10 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
             var isDarkMode by rememberSaveable { mutableStateOf(prefs.getBoolean("dark_mode", false)) }
+            var customThemeColor by remember {
+                val colorInt = prefs.getInt("theme_color", -1)
+                mutableStateOf(if (colorInt == -1) null else Color(colorInt))
+            }
             
             LaunchedEffect(isDarkMode) {
                 enableEdgeToEdge(
@@ -167,7 +171,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
             
-            UrgeProcessorTheme(darkTheme = isDarkMode) {
+            UrgeProcessorTheme(darkTheme = isDarkMode, customColor = customThemeColor) {
                 var currentDest by rememberSaveable { mutableStateOf(AppDestinations.FLOW) }
                 NavigationSuiteScaffold(
                     navigationSuiteItems = {
@@ -188,6 +192,15 @@ class MainActivity : ComponentActivity() {
                                     onDarkModeChange = { 
                                         isDarkMode = it
                                         prefs.edit().putBoolean("dark_mode", it).apply()
+                                    },
+                                    customThemeColor = customThemeColor,
+                                    onThemeColorChange = { color ->
+                                        customThemeColor = color
+                                        if (color != null) {
+                                            prefs.edit().putInt("theme_color", color.toArgb()).apply()
+                                        } else {
+                                            prefs.edit().remove("theme_color").apply()
+                                        }
                                     },
                                     onBack = { currentDest = AppDestinations.FLOW }
                                 )
@@ -903,7 +916,15 @@ fun DayEntriesDialog(
 }
 
 @Composable
-fun SettingsScreen(isDarkMode: Boolean, onDarkModeChange: (Boolean) -> Unit, onBack: () -> Unit) {
+fun SettingsScreen(
+    isDarkMode: Boolean,
+    onDarkModeChange: (Boolean) -> Unit,
+    customThemeColor: Color?,
+    onThemeColorChange: (Color?) -> Unit,
+    onBack: () -> Unit
+) {
+    var showColorPicker by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
@@ -915,20 +936,98 @@ fun SettingsScreen(isDarkMode: Boolean, onDarkModeChange: (Boolean) -> Unit, onB
         Spacer(modifier = Modifier.height(24.dp))
         
         Card(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.DarkMode, null)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("Dark Mode", style = MaterialTheme.typography.bodyLarge)
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DarkMode, null)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Dark Mode", style = MaterialTheme.typography.bodyLarge)
+                    }
+                    Switch(checked = isDarkMode, onCheckedChange = onDarkModeChange)
                 }
-                Switch(checked = isDarkMode, onCheckedChange = onDarkModeChange)
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp).clickable { showColorPicker = true },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Palette, null)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Color Theme", style = MaterialTheme.typography.bodyLarge)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(customThemeColor ?: MaterialTheme.colorScheme.primary)
+                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                    )
+                }
             }
         }
     }
+
+    if (showColorPicker) {
+        ThemeColorPickerDialog(
+            onColorSelected = { 
+                onThemeColorChange(it)
+                showColorPicker = false
+            },
+            onReset = {
+                onThemeColorChange(null)
+                showColorPicker = false
+            },
+            onDismiss = { showColorPicker = false }
+        )
+    }
+}
+
+@Composable
+fun ThemeColorPickerDialog(onColorSelected: (Color) -> Unit, onReset: () -> Unit, onDismiss: () -> Unit) {
+    val themeColors = listOf(
+        Color(0xFFEF5350), Color(0xFFE91E63), Color(0xFF9C27B0),
+        Color(0xFF673AB7), Color(0xFF3F51B5), Color(0xFF2196F3),
+        Color(0xFF03A9F4), Color(0xFF00BCD4), Color(0xFF009688),
+        Color(0xFF4CAF50), Color(0xFF8BC34A), Color(0xFFCDDC39),
+        Color(0xFFFFEB3B), Color(0xFFFFC107), Color(0xFFFF9800),
+        Color(0xFFFF5722), Color(0xFF795548), Color(0xFF607D8B)
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose App Theme Color") },
+        text = {
+            Column {
+                LazyVerticalGrid(columns = GridCells.Fixed(4), modifier = Modifier.height(200.dp)) {
+                    items(themeColors) { col ->
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .padding(4.dp)
+                                .clip(CircleShape)
+                                .background(col)
+                                .clickable { onColorSelected(col) }
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = onReset,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                ) {
+                    Text("Reset to Default")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 fun calculateStreak(entries: List<UrgeEntry>): Int {
