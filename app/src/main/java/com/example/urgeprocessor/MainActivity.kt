@@ -21,13 +21,16 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -178,10 +181,22 @@ class MainActivity : ComponentActivity() {
             
             UrgeProcessorTheme(darkTheme = isDarkMode, customColor = customThemeColor) {
                 var currentDest by rememberSaveable { mutableStateOf(AppDestinations.FLOW) }
+                var journalView by rememberSaveable { mutableStateOf(JournalView.LIST) }
+
                 NavigationSuiteScaffold(
                     navigationSuiteItems = {
                         AppDestinations.entries.filter { it.showInNavBar }.forEach {
-                            item(icon = { Icon(it.icon, null) }, label = { Text(it.label) }, selected = it == currentDest, onClick = { currentDest = it })
+                            item(
+                                icon = { Icon(it.icon, null) },
+                                label = { Text(it.label) },
+                                selected = it == currentDest,
+                                onClick = {
+                                    if (currentDest == it && it == AppDestinations.JOURNAL) {
+                                        journalView = if (journalView == JournalView.LIST) JournalView.CALENDAR else JournalView.LIST
+                                    }
+                                    currentDest = it
+                                }
+                            )
                         }
                     }
                 ) {
@@ -191,7 +206,14 @@ class MainActivity : ComponentActivity() {
                                 AppDestinations.FLOW -> UrgeFlowScreen(db, onNavigateToSettings = { currentDest = AppDestinations.SETTINGS })
                                 AppDestinations.BREATHE -> BreathingScreen()
                                 AppDestinations.RECORDS -> RecordsScreen(db)
-                                AppDestinations.JOURNAL -> StandardJournalScreen(db, journalColor, urgeColor, bothColor)
+                                AppDestinations.JOURNAL -> StandardJournalScreen(
+                                    db = db,
+                                    journalColor = journalColor,
+                                    urgeColor = urgeColor,
+                                    bothColor = bothColor,
+                                    currentView = journalView,
+                                    onViewChange = { journalView = it }
+                                )
                                 AppDestinations.SETTINGS -> SettingsScreen(
                                     isDarkMode = isDarkMode,
                                     onDarkModeChange = { 
@@ -632,10 +654,16 @@ fun RecordsScreen(db: AppDatabase) {
 
 // NEW: Standard Journal Screen
 @Composable
-fun StandardJournalScreen(db: AppDatabase, journalColor: Color, urgeColor: Color, bothColor: Color) {
+fun StandardJournalScreen(
+    db: AppDatabase,
+    journalColor: Color,
+    urgeColor: Color,
+    bothColor: Color,
+    currentView: JournalView,
+    onViewChange: (JournalView) -> Unit
+) {
     val entries by db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList())
     val urgeEntries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
-    var currentView by rememberSaveable { mutableStateOf(JournalView.LIST) }
     var selectedDate by remember { mutableStateOf<Date?>(null) }
     
     val context = LocalContext.current
@@ -650,7 +678,7 @@ fun StandardJournalScreen(db: AppDatabase, journalColor: Color, urgeColor: Color
             journalColor = journalColor,
             urgeColor = urgeColor,
             bothColor = bothColor,
-            onBack = { currentView = JournalView.LIST },
+            onBack = { onViewChange(JournalView.LIST) },
             onDayClick = { selectedDate = it }
         )
     } else {
@@ -659,7 +687,7 @@ fun StandardJournalScreen(db: AppDatabase, journalColor: Color, urgeColor: Color
                 Text("Daily Journal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { currentView = JournalView.CALENDAR }) {
+                    TextButton(onClick = { onViewChange(JournalView.CALENDAR) }) {
                         Icon(Icons.Default.CalendarMonth, null)
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Calendar")
@@ -768,9 +796,13 @@ fun JournalCalendarView(
     onBack: () -> Unit,
     onDayClick: (Date) -> Unit
 ) {
-    var calendar by remember { mutableStateOf(Calendar.getInstance()) }
-    val monthYearFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+    var calendar by remember { mutableStateOf(Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }) }
+    val monthFormat = SimpleDateFormat("MMMM", Locale.getDefault())
+    val yearFormat = SimpleDateFormat("yyyy", Locale.getDefault())
     var swipeOffsetX by remember { mutableFloatStateOf(0f) }
+    
+    var showMonthPicker by remember { mutableStateOf(false) }
+    var showYearPicker by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
@@ -781,7 +813,39 @@ fun JournalCalendarView(
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back")
             }
-            Text(monthYearFormat.format(calendar.time), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Month Box
+                Surface(
+                    onClick = { showMonthPicker = true },
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    color = Color.Transparent
+                ) {
+                    Text(
+                        text = monthFormat.format(calendar.time),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                
+                // Year Box
+                Surface(
+                    onClick = { showYearPicker = true },
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    color = Color.Transparent
+                ) {
+                    Text(
+                        text = yearFormat.format(calendar.time),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
             Row {
                 IconButton(onClick = {
                     val newCal = calendar.clone() as Calendar
@@ -798,6 +862,41 @@ fun JournalCalendarView(
                     Icon(Icons.Default.ChevronRight, contentDescription = "Next Month")
                 }
             }
+        }
+
+        if (showMonthPicker) {
+            MonthYearPickerDialog(
+                title = "Select Month",
+                items = (0..11).map { m -> 
+                    val cal = Calendar.getInstance().apply { set(Calendar.MONTH, m) }
+                    monthFormat.format(cal.time)
+                },
+                initialIndex = calendar.get(Calendar.MONTH),
+                onItemSelected = { index ->
+                    val newCal = calendar.clone() as Calendar
+                    newCal.set(Calendar.MONTH, index)
+                    calendar = newCal
+                    showMonthPicker = false
+                },
+                onDismiss = { showMonthPicker = false }
+            )
+        }
+
+        if (showYearPicker) {
+            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+            val years = ((currentYear - 50)..(currentYear + 50)).toList()
+            MonthYearPickerDialog(
+                title = "Select Year",
+                items = years.map { it.toString() },
+                initialIndex = years.indexOf(calendar.get(Calendar.YEAR)),
+                onItemSelected = { index ->
+                    val newCal = calendar.clone() as Calendar
+                    newCal.set(Calendar.YEAR, years[index])
+                    calendar = newCal
+                    showYearPicker = false
+                },
+                onDismiss = { showYearPicker = false }
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -912,6 +1011,61 @@ fun JournalCalendarView(
             LegendItem(bothColor, "Both Entries")
         }
     }
+}
+
+@Composable
+fun MonthYearPickerDialog(
+    title: String,
+    items: List<String>,
+    initialIndex: Int,
+    onItemSelected: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (initialIndex - 2).coerceAtLeast(0))
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Box(modifier = Modifier.height(250.dp).fillMaxWidth()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    itemsIndexed(items) { index, item ->
+                        val isSelected = index == initialIndex
+                        Text(
+                            text = item,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onItemSelected(index) }
+                                .padding(vertical = 12.dp)
+                                .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent),
+                            textAlign = TextAlign.Center,
+                            style = if (isSelected) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                
+                // Optional: add a gradient or indicators for "slidebar" feel
+                Box(modifier = Modifier.fillMaxWidth().height(40.dp).align(Alignment.TopCenter).background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(MaterialTheme.colorScheme.surface, Color.Transparent)
+                    )
+                ))
+                Box(modifier = Modifier.fillMaxWidth().height(40.dp).align(Alignment.BottomCenter).background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, MaterialTheme.colorScheme.surface)
+                    )
+                ))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
