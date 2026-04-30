@@ -28,6 +28,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -768,6 +770,7 @@ fun JournalCalendarView(
 ) {
     var calendar by remember { mutableStateOf(Calendar.getInstance()) }
     val monthYearFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+    var swipeOffsetX by remember { mutableFloatStateOf(0f) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(
@@ -799,72 +802,103 @@ fun JournalCalendarView(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Days of week header
-        Row(modifier = Modifier.fillMaxWidth()) {
-            val days = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-            days.forEach { day ->
-                Text(
-                    text = day,
-                    modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.Gray
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Calendar Grid
-        val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
-        val firstDayOfMonth = (calendar.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
-        val startOffset = firstDayOfMonth.get(Calendar.DAY_OF_WEEK) - 1
-
-        val totalSlots = 42
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(7),
-            modifier = Modifier.fillMaxWidth()
+        // Wrap Calendar area in Box for swipe gestures
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .pointerInput(calendar) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (swipeOffsetX > 150) {
+                                // Swipe Right -> Previous Month
+                                val newCal = calendar.clone() as Calendar
+                                newCal.add(Calendar.MONTH, -1)
+                                calendar = newCal
+                            } else if (swipeOffsetX < -150) {
+                                // Swipe Left -> Next Month
+                                val newCal = calendar.clone() as Calendar
+                                newCal.add(Calendar.MONTH, 1)
+                                calendar = newCal
+                            }
+                            swipeOffsetX = 0f
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            swipeOffsetX += dragAmount
+                        }
+                    )
+                }
         ) {
-            items(totalSlots) { index ->
-                val dayNum = index - startOffset + 1
-                if (dayNum in 1..daysInMonth) {
-                    val currentDayCal = (calendar.clone() as Calendar).apply {
-                        set(Calendar.DAY_OF_MONTH, dayNum)
-                        set(Calendar.HOUR_OF_DAY, 0)
-                        set(Calendar.MINUTE, 0)
-                        set(Calendar.SECOND, 0)
-                        set(Calendar.MILLISECOND, 0)
-                    }
-                    val startTime = currentDayCal.timeInMillis
-                    val endTime = startTime + 24 * 60 * 60 * 1000L
-
-                    val hasJournal = journalEntries.any { it.timestamp in startTime until endTime }
-                    val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
-
-                    val bgColor = when {
-                        hasJournal && hasUrge -> bothColor
-                        hasJournal -> journalColor
-                        hasUrge -> urgeColor
-                        else -> Color.Transparent
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .aspectRatio(1f)
-                            .padding(4.dp)
-                            .clip(CircleShape)
-                            .background(bgColor)
-                            .clickable { onDayClick(currentDayCal.time) },
-                        contentAlignment = Alignment.Center
-                    ) {
+            Column {
+                // Days of week header
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    val days = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+                    days.forEach { day ->
                         Text(
-                            text = dayNum.toString(),
-                            fontWeight = if (bgColor != Color.Transparent) FontWeight.Bold else FontWeight.Normal,
-                            color = if (bgColor != Color.Transparent) Color.White else MaterialTheme.colorScheme.onSurface
+                            text = day,
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.Gray
                         )
                     }
-                } else {
-                    Box(modifier = Modifier.aspectRatio(1f))
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Calendar Grid
+                val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
+                val firstDayOfMonth = (calendar.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
+                val startOffset = firstDayOfMonth.get(Calendar.DAY_OF_WEEK) - 1
+
+                val totalSlots = 42
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(7),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(totalSlots) { index ->
+                        val dayNum = index - startOffset + 1
+                        if (dayNum in 1..daysInMonth) {
+                            val currentDayCal = (calendar.clone() as Calendar).apply {
+                                set(Calendar.DAY_OF_MONTH, dayNum)
+                                set(Calendar.HOUR_OF_DAY, 0)
+                                set(Calendar.MINUTE, 0)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            val startTime = currentDayCal.timeInMillis
+                            val endTime = startTime + 24 * 60 * 60 * 1000L
+
+                            val hasJournal = journalEntries.any { it.timestamp in startTime until endTime }
+                            val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
+
+                            val bgColor = when {
+                                hasJournal && hasUrge -> bothColor
+                                hasJournal -> journalColor
+                                hasUrge -> urgeColor
+                                else -> Color.Transparent
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .aspectRatio(1f)
+                                    .padding(4.dp)
+                                    .clip(CircleShape)
+                                    .background(bgColor)
+                                    .clickable { onDayClick(currentDayCal.time) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = dayNum.toString(),
+                                    fontWeight = if (bgColor != Color.Transparent) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (bgColor != Color.Transparent) Color.White else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        } else {
+                            Box(modifier = Modifier.aspectRatio(1f))
+                        }
+                    }
                 }
             }
         }
