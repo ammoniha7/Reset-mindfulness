@@ -284,8 +284,8 @@ fun BreathingScreen() {
     var isRunning by remember { mutableStateOf(false) }
     var phase by remember { mutableStateOf("Ready?") }
     var targetScale by remember { mutableFloatStateOf(0.6f) }
-    var selectedCycles by remember { mutableIntStateOf(5) }
-    var cyclesLeft by remember { mutableIntStateOf(5) }
+    var selectedCycles by remember { mutableStateOf(5) }
+    var cyclesLeft by remember { mutableStateOf(5) }
     var isCyclesExpanded by remember { mutableStateOf(false) }
     var isTechniqueExpanded by remember { mutableStateOf(false) }
     var selectedTechnique by remember { mutableStateOf("4-7-8") }
@@ -562,11 +562,6 @@ fun ColorPickerDialog(onColorSelected: (Color) -> Unit, onDismiss: () -> Unit) {
 fun RecordsScreen(db: AppDatabase) {
     val entries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var entryToDelete by remember { mutableStateOf<UrgeEntry?>(null) }
-
-    // Calculate the cutoff for one week ago (7 days * 24h * 60m * 60s * 1000ms)
-    val oneWeekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -586,69 +581,9 @@ fun RecordsScreen(db: AppDatabase) {
                 }
             }
         }
-
-        items(entries) { entry ->
-            // UPDATED: Initial state depends on whether the entry is newer than one week
-            var expanded by remember { mutableStateOf(entry.timestamp > oneWeekAgo) }
-
-            val date = SimpleDateFormat("MMM dd, h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
-            val col = try { Color(android.graphics.Color.parseColor(entry.emotionColor)) } catch(e: Exception) { Color.Gray }
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-            ) {
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(col))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("${entry.category}: ${entry.specificEmotion}", fontWeight = ComposeFontWeight.Bold)
-                        }
-                        Text(date, style = MaterialTheme.typography.labelSmall)
-
-                        if (expanded) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            val labels = listOf("Loved: " to entry.feltLoved, "Stress: " to entry.stressReason, "Excited: " to entry.excitementWeek)
-                            labels.forEach { (label, value) ->
-                                if (value.isNotBlank()) {
-                                    Text(
-                                        buildAnnotatedString {
-                                            withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
-                                            append(value)
-                                        },
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    IconButton(onClick = { entryToDelete = entry }) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete Entry", tint = Color.Red.copy(alpha = 0.5f))
-                    }
-                }
-            }
+        item {
+            Text("Your search feature will go here.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
         }
-    }
-
-    if (entryToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { entryToDelete = null },
-            title = { Text("Delete Record?") },
-            text = { Text("This will permanently remove this urge entry from your history.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        entryToDelete?.let { db.urgeDao().deleteEntry(it) }
-                        entryToDelete = null
-                    }
-                }) { Text("Delete", color = Color.Red) }
-            },
-            dismissButton = {
-                TextButton(onClick = { entryToDelete = null }) { Text("Cancel") }
-            }
-        )
     }
 }
 
@@ -669,10 +604,10 @@ fun StandardJournalScreen(
     val context = LocalContext.current
     var text by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    var journalToDelete by remember { mutableStateOf<StandardJournalEntry?>(null) }
 
     if (currentView == JournalView.CALENDAR) {
         JournalCalendarView(
+            db = db,
             journalEntries = entries,
             urgeEntries = urgeEntries,
             journalColor = journalColor,
@@ -713,7 +648,7 @@ fun StandardJournalScreen(
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth().height(150.dp),
+                modifier = Modifier.fillMaxWidth().height(250.dp),
                 placeholder = { Text("Write your thoughts here...") },
                 shape = RoundedCornerShape(12.dp),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
@@ -730,26 +665,6 @@ fun StandardJournalScreen(
                 },
                 modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
             ) { Text("Save Entry") }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(entries) { entry ->
-                    val date = SimpleDateFormat("MMM dd, yyyy \u2022 h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(date, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(entry.content, style = MaterialTheme.typography.bodyLarge)
-                            }
-                            IconButton(onClick = { journalToDelete = entry }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Journal", tint = Color.Red.copy(alpha = 0.5f))
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -763,31 +678,13 @@ fun StandardJournalScreen(
             onDismiss = { selectedDate = null }
         )
     }
-
-    if (journalToDelete != null) {
-        AlertDialog(
-            onDismissRequest = { journalToDelete = null },
-            title = { Text("Delete Journal Entry?") },
-            text = { Text("Are you sure you want to delete this thought? This cannot be undone.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        journalToDelete?.let { db.urgeDao().deleteStandardJournal(it) }
-                        journalToDelete = null
-                    }
-                }) { Text("Delete", color = Color.Red) }
-            },
-            dismissButton = {
-                TextButton(onClick = { journalToDelete = null }) { Text("Cancel") }
-            }
-        )
-    }
 }
 
 // --- CALENDAR COMPONENTS ---
 
 @Composable
 fun JournalCalendarView(
+    db: AppDatabase,
     journalEntries: List<StandardJournalEntry>,
     urgeEntries: List<UrgeEntry>,
     journalColor: Color,
@@ -804,7 +701,31 @@ fun JournalCalendarView(
     var showMonthPicker by remember { mutableStateOf(false) }
     var showYearPicker by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    // Prepare chronological month list
+    val startOfMonth = calendar.timeInMillis
+    val endOfMonth = (calendar.clone() as Calendar).apply { 
+        add(Calendar.MONTH, 1)
+    }.timeInMillis
+
+    val monthJournalItems = journalEntries.filter { it.timestamp in startOfMonth until endOfMonth }
+    val monthUrgeItems = urgeEntries.filter { it.timestamp in startOfMonth until endOfMonth }
+    
+    // Unified item type for the combined list
+    data class CombinedItem(
+        val timestamp: Long,
+        val journal: StandardJournalEntry? = null,
+        val urge: UrgeEntry? = null
+    )
+
+    val combinedList = (monthJournalItems.map { CombinedItem(it.timestamp, journal = it) } +
+            monthUrgeItems.map { CombinedItem(it.timestamp, urge = it) })
+        .sortedBy { it.timestamp } // Oldest first
+
+    val scope = rememberCoroutineScope()
+    var journalToDelete by remember { mutableStateOf<StandardJournalEntry?>(null) }
+    var urgeToDelete by remember { mutableStateOf<UrgeEntry?>(null) }
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -905,7 +826,6 @@ fun JournalCalendarView(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
                 .pointerInput(calendar) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
@@ -952,50 +872,53 @@ fun JournalCalendarView(
                 val startOffset = firstDayOfMonth.get(Calendar.DAY_OF_WEEK) - 1
 
                 val totalSlots = 42
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(7),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(totalSlots) { index ->
-                        val dayNum = index - startOffset + 1
-                        if (dayNum in 1..daysInMonth) {
-                            val currentDayCal = (calendar.clone() as Calendar).apply {
-                                set(Calendar.DAY_OF_MONTH, dayNum)
-                                set(Calendar.HOUR_OF_DAY, 0)
-                                set(Calendar.MINUTE, 0)
-                                set(Calendar.SECOND, 0)
-                                set(Calendar.MILLISECOND, 0)
-                            }
-                            val startTime = currentDayCal.timeInMillis
-                            val endTime = startTime + 24 * 60 * 60 * 1000L
+                // Since we are inside a vertical scroll, we can't use LazyVerticalGrid directly with height expansion easily.
+                // We'll use manual Rows or a fixed height. A fixed column approach is better for vertical scroll compatibility.
+                val rows = (totalSlots + 6) / 7
+                for (row in 0 until rows) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        for (col in 0 until 7) {
+                            val index = row * 7 + col
+                            val dayNum = index - startOffset + 1
+                            Box(modifier = Modifier.weight(1f).aspectRatio(1f), contentAlignment = Alignment.Center) {
+                                if (dayNum in 1..daysInMonth) {
+                                    val currentDayCal = (calendar.clone() as Calendar).apply {
+                                        set(Calendar.DAY_OF_MONTH, dayNum)
+                                        set(Calendar.HOUR_OF_DAY, 0)
+                                        set(Calendar.MINUTE, 0)
+                                        set(Calendar.SECOND, 0)
+                                        set(Calendar.MILLISECOND, 0)
+                                    }
+                                    val startTime = currentDayCal.timeInMillis
+                                    val endTime = startTime + 24 * 60 * 60 * 1000L
 
-                            val hasJournal = journalEntries.any { it.timestamp in startTime until endTime }
-                            val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
+                                    val hasJournal = journalEntries.any { it.timestamp in startTime until endTime }
+                                    val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
 
-                            val bgColor = when {
-                                hasJournal && hasUrge -> bothColor
-                                hasJournal -> journalColor
-                                hasUrge -> urgeColor
-                                else -> Color.Transparent
-                            }
+                                    val bgColor = when {
+                                        hasJournal && hasUrge -> bothColor
+                                        hasJournal -> journalColor
+                                        hasUrge -> urgeColor
+                                        else -> Color.Transparent
+                                    }
 
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .padding(4.dp)
-                                    .clip(CircleShape)
-                                    .background(bgColor)
-                                    .clickable { onDayClick(currentDayCal.time) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = dayNum.toString(),
-                                    fontWeight = if (bgColor != Color.Transparent) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (bgColor != Color.Transparent) Color.White else MaterialTheme.colorScheme.onSurface
-                                )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(4.dp)
+                                            .clip(CircleShape)
+                                            .background(bgColor)
+                                            .clickable { onDayClick(currentDayCal.time) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = dayNum.toString(),
+                                            fontWeight = if (bgColor != Color.Transparent) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (bgColor != Color.Transparent) Color.White else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
                             }
-                        } else {
-                            Box(modifier = Modifier.aspectRatio(1f))
                         }
                     }
                 }
@@ -1004,12 +927,112 @@ fun JournalCalendarView(
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Legend
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            LegendItem(journalColor, "Journal Entry")
-            LegendItem(urgeColor, "Urge Flow Entry")
-            LegendItem(bothColor, "Both Entries")
+        // Chronological Month List
+        Text(
+            text = "${monthFormat.format(calendar.time)} Records",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        if (combinedList.isEmpty()) {
+            Text("No entries for this month.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+        } else {
+            combinedList.forEach { item ->
+                if (item.urge != null) {
+                    val entry = item.urge
+                    val date = SimpleDateFormat("MMM dd, h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                    val col = try { Color(android.graphics.Color.parseColor(entry.emotionColor)) } catch(e: Exception) { Color.Gray }
+                    
+                    Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(col))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("${entry.category}: ${entry.specificEmotion}", fontWeight = ComposeFontWeight.Bold)
+                                }
+                                Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                                val labels = listOf("Loved: " to entry.feltLoved, "Stress: " to entry.stressReason, "Excited: " to entry.excitementWeek)
+                                labels.forEach { (label, value) ->
+                                    if (value.isNotBlank()) {
+                                        Text(
+                                            buildAnnotatedString {
+                                                withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
+                                                append(value)
+                                            },
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+                            IconButton(onClick = { urgeToDelete = entry }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red.copy(alpha = 0.5f))
+                            }
+                        }
+                    }
+                } else if (item.journal != null) {
+                    val entry = item.journal
+                    val date = SimpleDateFormat("MMM dd, h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                    
+                    Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Journal Entry", fontWeight = FontWeight.Bold, color = journalColor)
+                                Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(entry.content, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            IconButton(onClick = { journalToDelete = entry }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red.copy(alpha = 0.5f))
+                            }
+                        }
+                    }
+                }
+            }
         }
+        
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (urgeToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { urgeToDelete = null },
+            title = { Text("Delete Urge Record?") },
+            text = { Text("This will permanently remove this record.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        urgeToDelete?.let { db.urgeDao().deleteEntry(it) }
+                        urgeToDelete = null
+                    }
+                }) { Text("Delete", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { urgeToDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (journalToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { journalToDelete = null },
+            title = { Text("Delete Journal Entry?") },
+            text = { Text("Are you sure you want to delete this thought?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        journalToDelete?.let { db.urgeDao().deleteStandardJournal(it) }
+                        journalToDelete = null
+                    }
+                }) { Text("Delete", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { journalToDelete = null }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -1345,7 +1368,7 @@ fun ThemeColorPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = { onDismiss() }) { Text("Cancel") }
         }
     )
 }
