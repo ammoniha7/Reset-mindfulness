@@ -181,7 +181,6 @@ class MainActivity : ComponentActivity() {
             
             UrgeProcessorTheme(darkTheme = isDarkMode, customColor = customThemeColor) {
                 var currentDest by rememberSaveable { mutableStateOf(AppDestinations.FLOW) }
-                var journalView by rememberSaveable { mutableStateOf(JournalView.LIST) }
 
                 NavigationSuiteScaffold(
                     navigationSuiteItems = {
@@ -190,12 +189,7 @@ class MainActivity : ComponentActivity() {
                                 icon = { Icon(it.icon, null) },
                                 label = { Text(it.label) },
                                 selected = it == currentDest,
-                                onClick = {
-                                    if (currentDest == it && it == AppDestinations.JOURNAL) {
-                                        journalView = if (journalView == JournalView.LIST) JournalView.CALENDAR else JournalView.LIST
-                                    }
-                                    currentDest = it
-                                }
+                                onClick = { currentDest = it }
                             )
                         }
                     }
@@ -205,14 +199,15 @@ class MainActivity : ComponentActivity() {
                             when (currentDest) {
                                 AppDestinations.FLOW -> UrgeFlowScreen(db, onNavigateToSettings = { currentDest = AppDestinations.SETTINGS })
                                 AppDestinations.BREATHE -> BreathingScreen()
-                                AppDestinations.RECORDS -> RecordsScreen(db)
-                                AppDestinations.JOURNAL -> StandardJournalScreen(
+                                AppDestinations.JOURNAL -> StandardJournalScreen(db, onNavigateToCalendar = { currentDest = AppDestinations.CALENDAR })
+                                AppDestinations.CALENDAR -> JournalCalendarView(
                                     db = db,
+                                    journalEntries = db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList()).value,
+                                    urgeEntries = db.urgeDao().getAllEntries().collectAsState(initial = emptyList()).value,
                                     journalColor = journalColor,
                                     urgeColor = urgeColor,
                                     bothColor = bothColor,
-                                    currentView = journalView,
-                                    onViewChange = { journalView = it }
+                                    onBack = { currentDest = AppDestinations.JOURNAL }
                                 )
                                 AppDestinations.SETTINGS -> SettingsScreen(
                                     isDarkMode = isDarkMode,
@@ -267,13 +262,12 @@ class MainActivity : ComponentActivity() {
 enum class AppDestinations(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val showInNavBar: Boolean = true) {
     FLOW("Urge Flow", Icons.Default.Psychology),
     BREATHE("Breathe", Icons.Default.Air),
-    RECORDS("Records", Icons.Default.LibraryBooks),
     JOURNAL("Journal", Icons.Default.EditNote),
+    CALENDAR("Calendar", Icons.Default.CalendarMonth),
     SETTINGS("Settings", Icons.Default.Settings, false)
 }
 
 enum class FlowStep { CATEGORY, SPECIFIC, COLOR, LOVED, STRESS, EXCITEMENT, COMPLETE }
-enum class JournalView { LIST, CALENDAR }
 
 // --- SCREENS ---
 
@@ -557,126 +551,66 @@ fun ColorPickerDialog(onColorSelected: (Color) -> Unit, onDismiss: () -> Unit) {
     }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
-// Renamed from JournalScreen to RecordsScreen
-@Composable
-fun RecordsScreen(db: AppDatabase) {
-    val entries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
-    val context = LocalContext.current
-
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Urge Records", style = MaterialTheme.typography.headlineMedium, fontWeight = ComposeFontWeight.Bold)
-                IconButton(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val textToCopy = entries.joinToString("\n\n") { entry ->
-                        val date = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
-                        "$date\nCategory: ${entry.category} (${entry.specificEmotion})\nLoved: ${entry.feltLoved}\nStress: ${entry.stressReason}\nExcited: ${entry.excitementWeek}"
-                    }
-                    val clip = ClipData.newPlainText("Urge Records", textToCopy)
-                    clipboard.setPrimaryClip(clip)
-                    Toast.makeText(context, "Records copied to clipboard", Toast.LENGTH_SHORT).show()
-                }) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy All")
-                }
-            }
-        }
-        item {
-            Text("Your search feature will go here.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-        }
-    }
-}
-
 // NEW: Standard Journal Screen
 @Composable
 fun StandardJournalScreen(
     db: AppDatabase,
-    journalColor: Color,
-    urgeColor: Color,
-    bothColor: Color,
-    currentView: JournalView,
-    onViewChange: (JournalView) -> Unit
+    onNavigateToCalendar: () -> Unit
 ) {
     val entries by db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList())
-    val urgeEntries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
-    var selectedDate by remember { mutableStateOf<Date?>(null) }
     
     val context = LocalContext.current
     var text by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    if (currentView == JournalView.CALENDAR) {
-        JournalCalendarView(
-            db = db,
-            journalEntries = entries,
-            urgeEntries = urgeEntries,
-            journalColor = journalColor,
-            urgeColor = urgeColor,
-            bothColor = bothColor,
-            onBack = { onViewChange(JournalView.LIST) },
-            onDayClick = { selectedDate = it }
-        )
-    } else {
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Daily Journal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Daily Journal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { onViewChange(JournalView.CALENDAR) }) {
-                        Icon(Icons.Default.CalendarMonth, null)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Calendar")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onNavigateToCalendar) {
+                    Icon(Icons.Default.CalendarMonth, null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Calendar")
+                }
+                // Copy to Clipboard Button
+                IconButton(onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val textToCopy = entries.joinToString("\n\n") { entry ->
+                        val date = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                        "$date\n${entry.content}"
                     }
-                    // Copy to Clipboard Button
-                    IconButton(onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        val textToCopy = entries.joinToString("\n\n") { entry ->
-                            val date = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
-                            "$date\n${entry.content}"
-                        }
-                        val clip = android.content.ClipData.newPlainText("Journal Entries", textToCopy)
-                        clipboard.setPrimaryClip(clip)
-                        android.widget.Toast.makeText(context, "Journal copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy All")
-                    }
+                    val clip = android.content.ClipData.newPlainText("Journal Entries", textToCopy)
+                    clipboard.setPrimaryClip(clip)
+                    android.widget.Toast.makeText(context, "Journal copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                }) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy All")
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth().height(250.dp),
-                placeholder = { Text("Write your thoughts here...") },
-                shape = RoundedCornerShape(12.dp),
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
-            )
-
-            Button(
-                onClick = {
-                    if (text.isNotBlank()) {
-                        scope.launch {
-                            db.urgeDao().insertStandardJournal(StandardJournalEntry(content = text))
-                            text = ""
-                        }
-                    }
-                },
-                modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
-            ) { Text("Save Entry") }
         }
-    }
 
-    if (selectedDate != null) {
-        DayEntriesDialog(
-            date = selectedDate!!,
-            journalEntries = entries,
-            urgeEntries = urgeEntries,
-            journalColor = journalColor,
-            urgeColor = urgeColor,
-            onDismiss = { selectedDate = null }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            modifier = Modifier.fillMaxWidth().height(250.dp),
+            placeholder = { Text("Write your thoughts here...") },
+            shape = RoundedCornerShape(12.dp),
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
         )
+
+        Button(
+            onClick = {
+                if (text.isNotBlank()) {
+                    scope.launch {
+                        db.urgeDao().insertStandardJournal(StandardJournalEntry(content = text))
+                        text = ""
+                    }
+                }
+            },
+            modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
+        ) { Text("Save Entry") }
     }
 }
 
@@ -690,8 +624,7 @@ fun JournalCalendarView(
     journalColor: Color,
     urgeColor: Color,
     bothColor: Color,
-    onBack: () -> Unit,
-    onDayClick: (Date) -> Unit
+    onBack: () -> Unit
 ) {
     var calendar by remember { mutableStateOf(Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }) }
     val monthFormat = SimpleDateFormat("MMMM", Locale.getDefault())
@@ -700,6 +633,7 @@ fun JournalCalendarView(
     
     var showMonthPicker by remember { mutableStateOf(false) }
     var showYearPicker by remember { mutableStateOf(false) }
+    var selectedDate by remember { mutableStateOf<Date?>(null) }
 
     // Prepare chronological month list
     val startOfMonth = calendar.timeInMillis
@@ -908,7 +842,7 @@ fun JournalCalendarView(
                                             .padding(4.dp)
                                             .clip(CircleShape)
                                             .background(bgColor)
-                                            .clickable { onDayClick(currentDayCal.time) },
+                                            .clickable { selectedDate = currentDayCal.time },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
@@ -995,6 +929,17 @@ fun JournalCalendarView(
         }
         
         Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (selectedDate != null) {
+        DayEntriesDialog(
+            date = selectedDate!!,
+            journalEntries = journalEntries,
+            urgeEntries = urgeEntries,
+            journalColor = journalColor,
+            urgeColor = urgeColor,
+            onDismiss = { selectedDate = null }
+        )
     }
 
     if (urgeToDelete != null) {
@@ -1146,7 +1091,19 @@ fun DayEntriesDialog(
                             Column(modifier = Modifier.padding(8.dp)) {
                                 Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = urgeColor)
                                 Text("${entry.category}: ${entry.specificEmotion}", fontWeight = FontWeight.Bold)
-                                Text("Loved: ${entry.feltLoved}", style = MaterialTheme.typography.bodySmall)
+                                
+                                val labels = listOf("Loved: " to entry.feltLoved, "Stress: " to entry.stressReason, "Excited: " to entry.excitementWeek)
+                                labels.forEach { (label, value) ->
+                                    if (value.isNotBlank()) {
+                                        Text(
+                                            buildAnnotatedString {
+                                                withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
+                                                append(value)
+                                            },
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
