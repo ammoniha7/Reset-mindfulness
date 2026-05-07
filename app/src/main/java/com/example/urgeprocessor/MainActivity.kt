@@ -9,6 +9,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import android.net.Uri
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight as ComposeFontWeight // Alias to avoid conflict
 import androidx.compose.ui.text.withStyle
 import android.os.*
@@ -199,7 +203,15 @@ class MainActivity : ComponentActivity() {
                             when (currentDest) {
                                 AppDestinations.FLOW -> UrgeFlowScreen(db, onNavigateToSettings = { currentDest = AppDestinations.SETTINGS })
                                 AppDestinations.BREATHE -> BreathingScreen()
-                                AppDestinations.JOURNAL -> StandardJournalScreen(db, onNavigateToCalendar = { currentDest = AppDestinations.CALENDAR })
+                                AppDestinations.JOURNAL -> StandardJournalScreen(
+                                    db = db,
+                                    onNavigateToCalendar = { currentDest = AppDestinations.CALENDAR },
+                                    onNavigateToImport = { currentDest = AppDestinations.IMPORT }
+                                )
+                                AppDestinations.IMPORT -> JournalImportScreen(
+                                    db = db,
+                                    onBack = { currentDest = AppDestinations.JOURNAL }
+                                )
                                 AppDestinations.CALENDAR -> JournalCalendarView(
                                     db = db,
                                     journalEntries = db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList()).value,
@@ -264,7 +276,8 @@ enum class AppDestinations(val label: String, val icon: androidx.compose.ui.grap
     BREATHE("Breathe", Icons.Default.Air),
     JOURNAL("Journal", Icons.Default.EditNote),
     CALENDAR("Calendar", Icons.Default.CalendarMonth),
-    SETTINGS("Settings", Icons.Default.Settings, false)
+    SETTINGS("Settings", Icons.Default.Settings, false),
+    IMPORT("Import", Icons.Default.UploadFile, false)
 }
 
 enum class FlowStep { CATEGORY, SPECIFIC, COLOR, LOVED, STRESS, EXCITEMENT, COMPLETE }
@@ -555,7 +568,8 @@ fun ColorPickerDialog(onColorSelected: (Color) -> Unit, onDismiss: () -> Unit) {
 @Composable
 fun StandardJournalScreen(
     db: AppDatabase,
-    onNavigateToCalendar: () -> Unit
+    onNavigateToCalendar: () -> Unit,
+    onNavigateToImport: () -> Unit
 ) {
     val entries by db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList())
     
@@ -600,18 +614,172 @@ fun StandardJournalScreen(
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
         )
 
-        Button(
-            onClick = {
-                if (text.isNotBlank()) {
-                    scope.launch {
-                        db.urgeDao().insertStandardJournal(StandardJournalEntry(content = text))
-                        text = ""
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row {
+                TextButton(onClick = onNavigateToImport) {
+                    Icon(Icons.Default.FileUpload, null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Import")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                TextButton(onClick = { /* Export will be added later */ }) {
+                    Icon(Icons.Default.FileDownload, null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Export")
+                }
+            }
+            
+            Button(
+                onClick = {
+                    if (text.isNotBlank()) {
+                        scope.launch {
+                            db.urgeDao().insertStandardJournal(StandardJournalEntry(content = text))
+                            text = ""
+                        }
                     }
                 }
-            },
-            modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
-        ) { Text("Save Entry") }
+            ) { Text("Save Entry") }
+        }
     }
+}
+
+@Composable
+fun JournalImportScreen(db: AppDatabase, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var inputText by remember { mutableStateOf("") }
+    var isProcessing by remember { mutableStateOf(false) }
+    var resultMessage by remember { mutableStateOf<String?>(null) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri: Uri? ->
+            uri?.let {
+                try {
+                    context.contentResolver.openInputStream(it)?.use { stream ->
+                        inputText = stream.bufferedReader().readText()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Error reading file", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    )
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            }
+            Text("Bulk Import Journal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        }
+
+        Text(
+            "Paste your text below or upload a .txt file. Format should be MM-DD-YYYY: or MM/DD/YYYY: followed by the entry.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+
+        OutlinedTextField(
+            value = inputText,
+            onValueChange = { inputText = it },
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            placeholder = { Text("Paste journal text here...") },
+            shape = RoundedCornerShape(8.dp)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = { filePickerLauncher.launch(arrayOf("text/plain")) },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            ) {
+                Icon(Icons.Default.AttachFile, null)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Select .txt")
+            }
+
+            Button(
+                onClick = {
+                    isProcessing = true
+                    scope.launch {
+                        val importedCount = parseAndImportJournal(db, inputText)
+                        isProcessing = false
+                        resultMessage = "Successfully imported $importedCount entries!"
+                        inputText = ""
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                enabled = inputText.isNotBlank() && !isProcessing
+            ) {
+                if (isProcessing) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                } else {
+                    Text("Start Import")
+                }
+            }
+        }
+
+        resultMessage?.let {
+            Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+        }
+    }
+}
+
+suspend fun parseAndImportJournal(db: AppDatabase, text: String): Int {
+    // Regex for MM-DD-YYYY or MM/DD/YYYY with optional colon
+    val regex = Regex("""(\d{1,2}[-/]\d{1,2}[-/]\d{4}):?""")
+    val matches = regex.findAll(text).toList()
+    if (matches.isEmpty()) return 0
+
+    var count = 0
+    val dateFormats = listOf(
+        SimpleDateFormat("MM-dd-yyyy", Locale.US),
+        SimpleDateFormat("MM/dd/yyyy", Locale.US),
+        SimpleDateFormat("M-d-yyyy", Locale.US),
+        SimpleDateFormat("M/d/yyyy", Locale.US)
+    )
+
+    for (i in matches.indices) {
+        val currentMatch = matches[i]
+        val dateString = currentMatch.groupValues[1]
+        
+        // Find everything between this match and the next one (or end of string)
+        val start = currentMatch.range.last + 1
+        val end = if (i + 1 < matches.size) matches[i + 1].range.first else text.length
+        val content = text.substring(start, end).trim()
+
+        if (content.isNotBlank()) {
+            var timestamp: Long? = null
+            for (format in dateFormats) {
+                try {
+                    val date = format.parse(dateString)
+                    if (date != null) {
+                        // Set to noon to avoid timezone/daylight issues causing day shifts
+                        val cal = Calendar.getInstance().apply {
+                            time = date
+                            set(Calendar.HOUR_OF_DAY, 12)
+                        }
+                        timestamp = cal.timeInMillis
+                        break
+                    }
+                } catch (e: Exception) {}
+            }
+
+            if (timestamp != null) {
+                db.urgeDao().insertStandardJournal(StandardJournalEntry(timestamp = timestamp, content = content))
+                count++
+            }
+        }
+    }
+    return count
 }
 
 // --- CALENDAR COMPONENTS ---
@@ -626,7 +794,13 @@ fun JournalCalendarView(
     bothColor: Color,
     onBack: () -> Unit
 ) {
-    var calendar by remember { mutableStateOf(Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }) }
+    var calendar by remember { mutableStateOf(Calendar.getInstance().apply { 
+        set(Calendar.DAY_OF_MONTH, 1)
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }) }
     val monthFormat = SimpleDateFormat("MMMM", Locale.getDefault())
     val yearFormat = SimpleDateFormat("yyyy", Locale.getDefault())
     var swipeOffsetX by remember { mutableFloatStateOf(0f) }
