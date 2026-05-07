@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.foundation.*
@@ -53,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.room.*
 import com.example.urgeprocessor.ui.theme.UrgeProcessorTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -574,8 +576,33 @@ fun StandardJournalScreen(
     val entries by db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList())
     
     val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("export_prefs", Context.MODE_PRIVATE) }
     var text by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    var showExportDialog by remember { mutableStateOf(false) }
+
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain"),
+        onResult = { uri: Uri? ->
+            uri?.let {
+                scope.launch {
+                    val exportText = prefs.getString("pending_export_text", "") ?: ""
+                    try {
+                        context.contentResolver.openOutputStream(it)?.use { stream ->
+                            stream.write(exportText.toByteArray())
+                        }
+                        val lastDate = prefs.getLong("pending_export_timestamp", 0L)
+                        if (lastDate != 0L) {
+                            prefs.edit().putLong("last_export_timestamp", lastDate).apply()
+                        }
+                        Toast.makeText(context, "Export successful", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Error saving file", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -626,7 +653,7 @@ fun StandardJournalScreen(
                     Text("Import")
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                TextButton(onClick = { /* Export will be added later */ }) {
+                TextButton(onClick = { showExportDialog = true }) {
                     Icon(Icons.Default.FileDownload, null)
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Export")
@@ -644,6 +671,23 @@ fun StandardJournalScreen(
                 }
             ) { Text("Save Entry") }
         }
+    }
+
+    if (showExportDialog) {
+        ExportSettingsDialog(
+            db = db,
+            prefs = prefs,
+            onDismiss = { showExportDialog = false },
+            onExportStart = { exportText, timestamp ->
+                prefs.edit()
+                    .putString("pending_export_text", exportText)
+                    .putLong("pending_export_timestamp", timestamp)
+                    .apply()
+                val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(timestamp))
+                createDocumentLauncher.launch("Journal_Export_$dateStr.txt")
+                showExportDialog = false
+            }
+        )
     }
 }
 
@@ -1603,4 +1647,113 @@ fun DailyQuoteSection(db: AppDatabase) {
             }
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ExportSettingsDialog(
+    db: AppDatabase,
+    prefs: android.content.SharedPreferences,
+    onDismiss: () -> Unit,
+    onExportStart: (String, Long) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val lastExport = prefs.getLong("last_export_timestamp", 0L)
+    val lastExportStr = if (lastExport == 0L) "Never" else SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(lastExport))
+    
+    var selectedDate by remember { 
+        val cal = Calendar.getInstance()
+        if (lastExport != 0L) cal.timeInMillis = lastExport
+        mutableStateOf(cal.timeInMillis)
+    }
+    
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDate)
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Export Entries") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Last export date: $lastExportStr", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text("Select start date for export (inclusive):", style = MaterialTheme.typography.bodyMedium)
+                
+                OutlinedButton(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.CalendarMonth, null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(selectedDate)))
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                scope.launch {
+                    val journalFlow = db.urgeDao().getAllStandardJournals()
+                    val urgeFlow = db.urgeDao().getAllEntries()
+                    
+                    val journals = journalFlow.first().filter { it.timestamp >= selectedDate }
+                    val urges = urgeFlow.first().filter { it.timestamp >= selectedDate }
+                    
+                    val exportText = generateExportText(journals, urges)
+                    onExportStart(exportText, selectedDate)
+                }
+            }) {
+                Text("Start Export")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+
+    if (showDatePicker) {
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { selectedDate = it }
+                    showDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
+
+fun generateExportText(journals: List<StandardJournalEntry>, urges: List<UrgeEntry>): String {
+    val dateFormat = SimpleDateFormat("MM-dd-yyyy", Locale.US)
+    val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
+    
+    data class ExportItem(val timestamp: Long, val text: String)
+    
+    val items = mutableListOf<ExportItem>()
+    
+    journals.forEach { j ->
+        val dateHeader = dateFormat.format(Date(j.timestamp))
+        val timeStr = timeFormat.format(Date(j.timestamp))
+        items.add(ExportItem(j.timestamp, "$dateHeader:\n[Journal - $timeStr]\n${j.content}\n"))
+    }
+    
+    urges.forEach { u ->
+        val dateHeader = dateFormat.format(Date(u.timestamp))
+        val timeStr = timeFormat.format(Date(u.timestamp))
+        val sb = StringBuilder()
+        sb.append("$dateHeader:\n")
+        sb.append("[Urge Flow - $timeStr]\n")
+        sb.append("Category: ${u.category} (${u.specificEmotion})\n")
+        if (u.feltLoved.isNotBlank()) sb.append("Loved: ${u.feltLoved}\n")
+        if (u.stressReason.isNotBlank()) sb.append("Stress: ${u.stressReason}\n")
+        if (u.excitementWeek.isNotBlank()) sb.append("Excited: ${u.excitementWeek}\n")
+        items.add(ExportItem(u.timestamp, sb.toString()))
+    }
+    
+    return items.sortedBy { it.timestamp }.joinToString("\n") { it.text }
 }
