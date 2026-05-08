@@ -532,7 +532,18 @@ fun UrgeFlowScreen(db: AppDatabase, onNavigateToSettings: () -> Unit) {
             }
             FlowStep.LOVED -> QuestionTemplate("Have you felt loved by someone today?", entry.feltLoved, { entry = entry.copy(feltLoved = it) }, { step = FlowStep.STRESS })
             FlowStep.STRESS -> QuestionTemplate("What's causing you stress right now?", entry.stressReason, { entry = entry.copy(stressReason = it) }, { step = FlowStep.EXCITEMENT })
-            FlowStep.EXCITEMENT -> QuestionTemplate("What are you excited for this week?", entry.excitementWeek, { entry = entry.copy(excitementWeek = it) }, { scope.launch { db.urgeDao().insert(entry); step = FlowStep.COMPLETE } })
+            FlowStep.EXCITEMENT -> QuestionTemplate("What are you excited for this week?", entry.excitementWeek, { entry = entry.copy(excitementWeek = it) }, { 
+                scope.launch { 
+                    val normalizedEntry = entry.copy(timestamp = Calendar.getInstance().apply {
+                        set(Calendar.HOUR_OF_DAY, 0)
+                        set(Calendar.MINUTE, 0)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }.timeInMillis)
+                    db.urgeDao().insert(normalizedEntry); 
+                    step = FlowStep.COMPLETE 
+                } 
+            })
             FlowStep.COMPLETE -> {
                 Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(80.dp), tint = Color(0xFF4CAF50))
                 Text("Entry Saved", style = MaterialTheme.typography.headlineSmall)
@@ -618,7 +629,7 @@ fun StandardJournalScreen(
                 IconButton(onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     val textToCopy = entries.joinToString("\n\n") { entry ->
-                        val date = SimpleDateFormat("MMM dd, yyyy h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                        val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
                         "$date\n${entry.content}"
                     }
                     val clip = android.content.ClipData.newPlainText("Journal Entries", textToCopy)
@@ -664,7 +675,13 @@ fun StandardJournalScreen(
                 onClick = {
                     if (text.isNotBlank()) {
                         scope.launch {
-                            db.urgeDao().insertStandardJournal(StandardJournalEntry(content = text))
+                            val normalizedTimestamp = Calendar.getInstance().apply {
+                                set(Calendar.HOUR_OF_DAY, 0)
+                                set(Calendar.MINUTE, 0)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }.timeInMillis
+                            db.urgeDao().insertStandardJournal(StandardJournalEntry(timestamp = normalizedTimestamp, content = text))
                             text = ""
                         }
                     }
@@ -806,10 +823,13 @@ suspend fun parseAndImportJournal(db: AppDatabase, text: String): Int {
                 try {
                     val date = format.parse(dateString)
                     if (date != null) {
-                        // Set to noon to avoid timezone/daylight issues causing day shifts
+                        // Normalize to midnight
                         val cal = Calendar.getInstance().apply {
                             time = date
-                            set(Calendar.HOUR_OF_DAY, 12)
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
                         }
                         timestamp = cal.timeInMillis
                         break
@@ -865,13 +885,14 @@ fun JournalCalendarView(
     // Unified item type for the combined list
     data class CombinedItem(
         val timestamp: Long,
+        val id: Int,
         val journal: StandardJournalEntry? = null,
         val urge: UrgeEntry? = null
     )
 
-    val combinedList = (monthJournalItems.map { CombinedItem(it.timestamp, journal = it) } +
-            monthUrgeItems.map { CombinedItem(it.timestamp, urge = it) })
-        .sortedBy { it.timestamp } // Oldest first
+    val combinedList = (monthJournalItems.map { CombinedItem(it.timestamp, it.id, journal = it) } +
+            monthUrgeItems.map { CombinedItem(it.timestamp, it.id, urge = it) })
+        .sortedWith(compareBy({ it.timestamp }, { it.id })) // Oldest first, entry order for same day
 
     val scope = rememberCoroutineScope()
     var journalToDelete by remember { mutableStateOf<StandardJournalEntry?>(null) }
@@ -1093,7 +1114,7 @@ fun JournalCalendarView(
             combinedList.forEach { item ->
                 if (item.urge != null) {
                     val entry = item.urge
-                    val date = SimpleDateFormat("MMM dd, h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                    val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
                     val col = try { Color(android.graphics.Color.parseColor(entry.emotionColor)) } catch(e: Exception) { Color.Gray }
                     
                     Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
@@ -1127,7 +1148,7 @@ fun JournalCalendarView(
                     }
                 } else if (item.journal != null) {
                     val entry = item.journal
-                    val date = SimpleDateFormat("MMM dd, h:mm a", Locale.getDefault()).format(Date(entry.timestamp))
+                    val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
                     
                     Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
                         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
@@ -1273,7 +1294,6 @@ fun DayEntriesDialog(
     onDismiss: () -> Unit
 ) {
     val dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
-    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
     val startTime = Calendar.getInstance().apply {
         time = date
         set(Calendar.HOUR_OF_DAY, 0)
@@ -1296,7 +1316,6 @@ fun DayEntriesDialog(
                     items(dayJournals) { entry ->
                         Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = journalColor.copy(alpha = 0.1f))) {
                             Column(modifier = Modifier.padding(8.dp)) {
-                                Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = journalColor)
                                 Text(entry.content, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
@@ -1307,7 +1326,6 @@ fun DayEntriesDialog(
                     items(dayUrges) { entry ->
                         Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = urgeColor.copy(alpha = 0.1f))) {
                             Column(modifier = Modifier.padding(8.dp)) {
-                                Text(timeFormat.format(Date(entry.timestamp)), style = MaterialTheme.typography.labelSmall, color = urgeColor)
                                 Text("${entry.category}: ${entry.specificEmotion}", fontWeight = FontWeight.Bold)
                                 
                                 val labels = listOf("Loved: " to entry.feltLoved, "Stress: " to entry.stressReason, "Excited: " to entry.excitementWeek)
@@ -1730,7 +1748,6 @@ fun ExportSettingsDialog(
 
 fun generateExportText(journals: List<StandardJournalEntry>, urges: List<UrgeEntry>): String {
     val dateFormat = SimpleDateFormat("MM-dd-yyyy", Locale.US)
-    val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
     
     data class ExportItem(val timestamp: Long, val text: String)
     
@@ -1738,16 +1755,14 @@ fun generateExportText(journals: List<StandardJournalEntry>, urges: List<UrgeEnt
     
     journals.forEach { j ->
         val dateHeader = dateFormat.format(Date(j.timestamp))
-        val timeStr = timeFormat.format(Date(j.timestamp))
-        items.add(ExportItem(j.timestamp, "$dateHeader:\n[Journal - $timeStr]\n${j.content}\n"))
+        items.add(ExportItem(j.timestamp, "$dateHeader:\n[Journal]\n${j.content}\n"))
     }
     
     urges.forEach { u ->
         val dateHeader = dateFormat.format(Date(u.timestamp))
-        val timeStr = timeFormat.format(Date(u.timestamp))
         val sb = StringBuilder()
         sb.append("$dateHeader:\n")
-        sb.append("[Urge Flow - $timeStr]\n")
+        sb.append("[Urge Flow]\n")
         sb.append("Category: ${u.category} (${u.specificEmotion})\n")
         if (u.feltLoved.isNotBlank()) sb.append("Loved: ${u.feltLoved}\n")
         if (u.stressReason.isNotBlank()) sb.append("Stress: ${u.stressReason}\n")
