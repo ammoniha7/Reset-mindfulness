@@ -1,8 +1,10 @@
 package com.example.urgeprocessor
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import android.content.ClipData
@@ -44,11 +46,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.room.*
@@ -872,6 +878,19 @@ fun JournalCalendarView(
     var showMonthPicker by remember { mutableStateOf(false) }
     var showYearPicker by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf<Date?>(null) }
+    
+    // Search State
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var activeSearchQuery by rememberSaveable { mutableStateOf("") }
+    var isSearchActive by rememberSaveable { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(isSearchActive) {
+        if (isSearchActive) {
+            focusRequester.requestFocus()
+        }
+    }
 
     // Prepare chronological month list
     val startOfMonth = calendar.timeInMillis
@@ -909,38 +928,69 @@ fun JournalCalendarView(
             }
             
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Month Box
-                Surface(
-                    onClick = { showMonthPicker = true },
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    color = Color.Transparent
-                ) {
-                    Text(
-                        text = monthFormat.format(calendar.time),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                if (isSearchActive) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.weight(1f).heightIn(min = 40.dp).focusRequester(focusRequester),
+                        placeholder = { Text("Search entries...") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            activeSearchQuery = searchQuery
+                            keyboardController?.hide()
+                        }),
+                        trailingIcon = {
+                            IconButton(onClick = { 
+                                searchQuery = ""
+                                activeSearchQuery = ""
+                                isSearchActive = false 
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close Search")
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        textStyle = MaterialTheme.typography.bodyMedium
                     )
-                }
-                
-                // Year Box
-                Surface(
-                    onClick = { showYearPicker = true },
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    color = Color.Transparent
-                ) {
-                    Text(
-                        text = yearFormat.format(calendar.time),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                } else {
+                    // Month Box
+                    Surface(
+                        onClick = { showMonthPicker = true },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        color = Color.Transparent
+                    ) {
+                        Text(
+                            text = monthFormat.format(calendar.time),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    
+                    // Year Box
+                    Surface(
+                        onClick = { showYearPicker = true },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        color = Color.Transparent
+                    ) {
+                        Text(
+                            text = yearFormat.format(calendar.time),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 
             Row {
+                if (!isSearchActive) {
+                    IconButton(onClick = { isSearchActive = true }) {
+                        Icon(Icons.Default.Search, contentDescription = "Open Search")
+                    }
+                }
                 IconButton(onClick = {
                     val newCal = calendar.clone() as Calendar
                     newCal.add(Calendar.MONTH, -1)
@@ -1100,66 +1150,90 @@ fun JournalCalendarView(
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Chronological Month List
-        Text(
-            text = "${monthFormat.format(calendar.time)} Records",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
+        // Results Section (Search vs Month Records)
+        if (isSearchActive && activeSearchQuery.isNotBlank()) {
+            Text(
+                text = "Search Results",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
 
-        if (combinedList.isEmpty()) {
-            Text("No entries for this month.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            val searchResults = remember(activeSearchQuery, journalEntries, urgeEntries) {
+                performSearch(activeSearchQuery, journalEntries, urgeEntries)
+            }
+
+            if (searchResults.isEmpty()) {
+                Text("No matches found for \"$searchQuery\"", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            } else {
+                searchResults.forEach { result ->
+                    SearchResultCard(result, journalColor, urgeColor) {
+                        selectedDate = Date(result.timestamp)
+                    }
+                }
+            }
         } else {
-            combinedList.forEach { item ->
-                if (item.urge != null) {
-                    val entry = item.urge
-                    val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
-                    val col = try { Color(android.graphics.Color.parseColor(entry.emotionColor)) } catch(e: Exception) { Color.Gray }
-                    
-                    Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(col))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("${entry.category}: ${entry.specificEmotion}", fontWeight = ComposeFontWeight.Bold)
-                                }
-                                Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                
-                                Spacer(modifier = Modifier.height(8.dp))
-                                val labels = listOf("Loved: " to entry.feltLoved, "Stress: " to entry.stressReason, "Excited: " to entry.excitementWeek)
-                                labels.forEach { (label, value) ->
-                                    if (value.isNotBlank()) {
-                                        Text(
-                                            buildAnnotatedString {
-                                                withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
-                                                append(value)
-                                            },
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
+            // Chronological Month List
+            Text(
+                text = "${monthFormat.format(calendar.time)} Records",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            if (combinedList.isEmpty()) {
+                Text("No entries for this month.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            } else {
+                combinedList.forEach { item ->
+                    if (item.urge != null) {
+                        val entry = item.urge
+                        val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
+                        val col = try { Color(android.graphics.Color.parseColor(entry.emotionColor)) } catch(e: Exception) { Color.Gray }
+                        
+                        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(modifier = Modifier.size(12.dp).clip(CircleShape).background(col))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("${entry.category}: ${entry.specificEmotion}", fontWeight = ComposeFontWeight.Bold)
+                                    }
+                                    Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                    
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    val labels = listOf("Loved: " to entry.feltLoved, "Stress: " to entry.stressReason, "Excited: " to entry.excitementWeek)
+                                    labels.forEach { (label, value) ->
+                                        if (value.isNotBlank()) {
+                                            Text(
+                                                buildAnnotatedString {
+                                                    withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
+                                                    append(value)
+                                                },
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
                                     }
                                 }
-                            }
-                            IconButton(onClick = { urgeToDelete = entry }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red.copy(alpha = 0.5f))
+                                IconButton(onClick = { urgeToDelete = entry }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red.copy(alpha = 0.5f))
+                                }
                             }
                         }
-                    }
-                } else if (item.journal != null) {
-                    val entry = item.journal
-                    val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
-                    
-                    Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Journal Entry", fontWeight = FontWeight.Bold, color = journalColor)
-                                Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(entry.content, style = MaterialTheme.typography.bodyMedium)
-                            }
-                            IconButton(onClick = { journalToDelete = entry }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red.copy(alpha = 0.5f))
+                    } else if (item.journal != null) {
+                        val entry = item.journal
+                        val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
+                        
+                        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Journal Entry", fontWeight = FontWeight.Bold, color = journalColor)
+                                    Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(entry.content, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                IconButton(onClick = { journalToDelete = entry }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red.copy(alpha = 0.5f))
+                                }
                             }
                         }
                     }
@@ -1281,6 +1355,128 @@ fun LegendItem(color: Color, label: String) {
         Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(color))
         Spacer(modifier = Modifier.width(8.dp))
         Text(label, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+// --- SEARCH UTILS ---
+
+data class SearchResult(
+    val timestamp: Long,
+    val type: String, // "Journal" or "Urge"
+    val snippet: androidx.compose.ui.text.AnnotatedString,
+    val relevance: Int,
+    val originalEntry: Any // The StandardJournalEntry or UrgeEntry object
+)
+
+fun performSearch(query: String, journals: List<StandardJournalEntry>, urges: List<UrgeEntry>): List<SearchResult> {
+    val results = mutableListOf<SearchResult>()
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return emptyList()
+
+    val terms = q.split(" ").filter { it.isNotEmpty() }
+
+    // Search Journals
+    journals.forEach { entry ->
+        val content = entry.content.lowercase()
+        var relevance = 0
+        if (content.contains(q)) {
+            relevance = 100 // Exact phrase match
+        } else if (terms.all { content.contains(it) }) {
+            relevance = 50 // All words present
+        } else if (terms.any { content.contains(it) }) {
+            relevance = 10 // Partial match
+        }
+
+        if (relevance > 0) {
+            results.add(SearchResult(
+                timestamp = entry.timestamp,
+                type = "Journal",
+                snippet = createSearchSnippet(entry.content, q),
+                relevance = relevance,
+                originalEntry = entry
+            ))
+        }
+    }
+
+    // Search Urge Entries
+    urges.forEach { entry ->
+        val fields = listOf(entry.category, entry.specificEmotion, entry.feltLoved, entry.stressReason, entry.excitementWeek)
+        val fullText = fields.joinToString(" ").lowercase()
+        
+        var relevance = 0
+        if (fullText.contains(q)) {
+            relevance = 100
+        } else if (terms.all { fullText.contains(it) }) {
+            relevance = 50
+        } else if (terms.any { fullText.contains(it) }) {
+            relevance = 10
+        }
+
+        if (relevance > 0) {
+            val displaySnippet = fields.filter { it.lowercase().contains(terms.first()) }.joinToString(" | ")
+            results.add(SearchResult(
+                timestamp = entry.timestamp,
+                type = "Urge Flow",
+                snippet = createSearchSnippet(displaySnippet.ifEmpty { entry.category + ": " + entry.specificEmotion }, q),
+                relevance = relevance,
+                originalEntry = entry
+            ))
+        }
+    }
+
+    return results.sortedWith(compareByDescending<SearchResult> { it.relevance }.thenByDescending { it.timestamp })
+}
+
+fun createSearchSnippet(text: String, query: String): androidx.compose.ui.text.AnnotatedString {
+    val index = text.lowercase().indexOf(query.lowercase().split(" ").first())
+    val start = (index - 30).coerceAtLeast(0)
+    val end = (index + query.length + 30).coerceAtMost(text.length)
+    
+    val snippetBase = (if (start > 0) "..." else "") + text.substring(start, end) + (if (end < text.length) "..." else "")
+    
+    return buildAnnotatedString {
+        val lowerSnippet = snippetBase.lowercase()
+        val lowerQuery = query.lowercase()
+        
+        var currentStart = 0
+        while (currentStart < snippetBase.length) {
+            val matchIndex = lowerSnippet.indexOf(lowerQuery, currentStart)
+            if (matchIndex == -1) {
+                append(snippetBase.substring(currentStart))
+                break
+            }
+            
+            append(snippetBase.substring(currentStart, matchIndex))
+            withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold, background = Color.Yellow.copy(alpha = 0.3f))) {
+                append(snippetBase.substring(matchIndex, matchIndex + query.length))
+            }
+            currentStart = matchIndex + query.length
+        }
+    }
+}
+
+@Composable
+fun SearchResultCard(result: SearchResult, journalColor: Color, urgeColor: Color, onClick: () -> Unit) {
+    val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(result.timestamp))
+    val typeColor = if (result.type == "Journal") journalColor else urgeColor
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(result.type, style = MaterialTheme.typography.labelMedium, color = typeColor, fontWeight = FontWeight.Bold)
+                Text(date, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = result.snippet,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
