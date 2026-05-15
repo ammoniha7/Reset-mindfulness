@@ -58,7 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.room.*
-import com.example.urgeprocessor.ui.theme.UrgeProcessorTheme
+import com.example.urgeprocessor.ui.theme.ResetTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -191,8 +191,9 @@ class MainActivity : ComponentActivity() {
                 )
             }
             
-            UrgeProcessorTheme(darkTheme = isDarkMode, customColor = customThemeColor) {
+            ResetTheme(darkTheme = isDarkMode, customColor = customThemeColor) {
                 var currentDest by rememberSaveable { mutableStateOf(AppDestinations.FLOW) }
+                var calendarResetTrigger by remember { mutableLongStateOf(0L) }
 
                 NavigationSuiteScaffold(
                     navigationSuiteItems = {
@@ -201,7 +202,12 @@ class MainActivity : ComponentActivity() {
                                 icon = { Icon(it.icon, null) },
                                 label = { Text(it.label) },
                                 selected = it == currentDest,
-                                onClick = { currentDest = it }
+                                onClick = {
+                                    if (currentDest == it && it == AppDestinations.CALENDAR) {
+                                        calendarResetTrigger = System.currentTimeMillis()
+                                    }
+                                    currentDest = it
+                                }
                             )
                         }
                     }
@@ -227,7 +233,8 @@ class MainActivity : ComponentActivity() {
                                     journalColor = journalColor,
                                     urgeColor = urgeColor,
                                     bothColor = bothColor,
-                                    onBack = { currentDest = AppDestinations.JOURNAL }
+                                    onBack = { currentDest = AppDestinations.JOURNAL },
+                                    resetTrigger = calendarResetTrigger
                                 )
                                 AppDestinations.SETTINGS -> SettingsScreen(
                                     isDarkMode = isDarkMode,
@@ -862,7 +869,8 @@ fun JournalCalendarView(
     journalColor: Color,
     urgeColor: Color,
     bothColor: Color,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    resetTrigger: Long = 0L
 ) {
     var calendar by remember { mutableStateOf(Calendar.getInstance().apply { 
         set(Calendar.DAY_OF_MONTH, 1)
@@ -871,6 +879,18 @@ fun JournalCalendarView(
         set(Calendar.SECOND, 0)
         set(Calendar.MILLISECOND, 0)
     }) }
+
+    LaunchedEffect(resetTrigger) {
+        if (resetTrigger > 0L) {
+            calendar = Calendar.getInstance().apply { 
+                set(Calendar.DAY_OF_MONTH, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+        }
+    }
     val monthFormat = SimpleDateFormat("MMMM", Locale.getDefault())
     val yearFormat = SimpleDateFormat("yyyy", Locale.getDefault())
     var swipeOffsetX by remember { mutableFloatStateOf(0f) }
@@ -1118,6 +1138,13 @@ fun JournalCalendarView(
                                     val hasJournal = journalEntries.any { it.timestamp in startTime until endTime }
                                     val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
 
+                                    val isToday = startTime == Calendar.getInstance().apply {
+                                        set(Calendar.HOUR_OF_DAY, 0)
+                                        set(Calendar.MINUTE, 0)
+                                        set(Calendar.SECOND, 0)
+                                        set(Calendar.MILLISECOND, 0)
+                                    }.timeInMillis
+
                                     val bgColor = when {
                                         hasJournal && hasUrge -> bothColor
                                         hasJournal -> journalColor
@@ -1130,14 +1157,20 @@ fun JournalCalendarView(
                                             .fillMaxSize()
                                             .padding(4.dp)
                                             .clip(CircleShape)
+                                            .then(
+                                                if (isToday && bgColor == Color.Transparent) {
+                                                    Modifier.border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                                } else Modifier
+                                            )
                                             .background(bgColor)
                                             .clickable { selectedDate = currentDayCal.time },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             text = dayNum.toString(),
-                                            fontWeight = if (bgColor != Color.Transparent) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (bgColor != Color.Transparent) Color.White else MaterialTheme.colorScheme.onSurface
+                                            fontWeight = if (bgColor != Color.Transparent || isToday) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (bgColor != Color.Transparent) Color.White else if (isToday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            textDecoration = if (isToday) androidx.compose.ui.text.style.TextDecoration.Underline else null
                                         )
                                     }
                                 }
@@ -1251,6 +1284,7 @@ fun JournalCalendarView(
             urgeEntries = urgeEntries,
             journalColor = journalColor,
             urgeColor = urgeColor,
+            searchQuery = if (isSearchActive) activeSearchQuery else "",
             onDismiss = { selectedDate = null }
         )
     }
@@ -1434,23 +1468,55 @@ fun createSearchSnippet(text: String, query: String): androidx.compose.ui.text.A
     
     val snippetBase = (if (start > 0) "..." else "") + text.substring(start, end) + (if (end < text.length) "..." else "")
     
+    return getHighlightedText(snippetBase, query)
+}
+
+fun getHighlightedText(text: String, query: String): androidx.compose.ui.text.AnnotatedString {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return buildAnnotatedString { append(text) }
+    
+    val terms = q.split(" ").filter { it.isNotEmpty() }
+    
     return buildAnnotatedString {
-        val lowerSnippet = snippetBase.lowercase()
-        val lowerQuery = query.lowercase()
+        val lowerText = text.lowercase()
+        val matches = mutableListOf<IntRange>()
         
-        var currentStart = 0
-        while (currentStart < snippetBase.length) {
-            val matchIndex = lowerSnippet.indexOf(lowerQuery, currentStart)
-            if (matchIndex == -1) {
-                append(snippetBase.substring(currentStart))
-                break
+        terms.forEach { term ->
+            var idx = lowerText.indexOf(term)
+            while (idx != -1) {
+                matches.add(idx until (idx + term.length))
+                idx = lowerText.indexOf(term, idx + term.length)
             }
-            
-            append(snippetBase.substring(currentStart, matchIndex))
+        }
+        
+        val sortedMatches = matches.sortedBy { it.first }
+        val mergedMatches = mutableListOf<IntRange>()
+        if (sortedMatches.isNotEmpty()) {
+            var current = sortedMatches[0]
+            for (i in 1 until sortedMatches.size) {
+                val next = sortedMatches[i]
+                if (next.first <= current.last + 1) { // +1 to merge adjacent
+                    current = current.first .. maxOf(current.last, next.last)
+                } else {
+                    mergedMatches.add(current)
+                    current = next
+                }
+            }
+            mergedMatches.add(current)
+        }
+        
+        var lastIndex = 0
+        mergedMatches.forEach { range ->
+            if (range.first > lastIndex) {
+                append(text.substring(lastIndex, range.first))
+            }
             withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold, background = Color.Yellow.copy(alpha = 0.3f))) {
-                append(snippetBase.substring(matchIndex, matchIndex + query.length))
+                append(text.substring(range.first, range.last + 1))
             }
-            currentStart = matchIndex + query.length
+            lastIndex = range.last + 1
+        }
+        if (lastIndex < text.length) {
+            append(text.substring(lastIndex))
         }
     }
 }
@@ -1487,6 +1553,7 @@ fun DayEntriesDialog(
     urgeEntries: List<UrgeEntry>,
     journalColor: Color,
     urgeColor: Color,
+    searchQuery: String = "",
     onDismiss: () -> Unit
 ) {
     val dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
@@ -1512,7 +1579,10 @@ fun DayEntriesDialog(
                     items(dayJournals) { entry ->
                         Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = journalColor.copy(alpha = 0.1f))) {
                             Column(modifier = Modifier.padding(8.dp)) {
-                                Text(entry.content, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = if (searchQuery.isNotBlank()) getHighlightedText(entry.content, searchQuery) else buildAnnotatedString { append(entry.content) },
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                             }
                         }
                     }
@@ -1522,15 +1592,25 @@ fun DayEntriesDialog(
                     items(dayUrges) { entry ->
                         Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = urgeColor.copy(alpha = 0.1f))) {
                             Column(modifier = Modifier.padding(8.dp)) {
-                                Text("${entry.category}: ${entry.specificEmotion}", fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (searchQuery.isNotBlank()) getHighlightedText("${entry.category}: ${entry.specificEmotion}", searchQuery) else buildAnnotatedString { append("${entry.category}: ${entry.specificEmotion}") },
+                                    fontWeight = FontWeight.Bold
+                                )
                                 
                                 val labels = listOf("Loved: " to entry.feltLoved, "Stress: " to entry.stressReason, "Excited: " to entry.excitementWeek)
                                 labels.forEach { (label, value) ->
                                     if (value.isNotBlank()) {
                                         Text(
-                                            buildAnnotatedString {
-                                                withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
-                                                append(value)
+                                            text = if (searchQuery.isNotBlank()) {
+                                                buildAnnotatedString {
+                                                    withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
+                                                    append(getHighlightedText(value, searchQuery))
+                                                }
+                                            } else {
+                                                buildAnnotatedString {
+                                                    withStyle(style = SpanStyle(fontWeight = ComposeFontWeight.Bold)) { append(label) }
+                                                    append(value)
+                                                }
                                             },
                                             style = MaterialTheme.typography.bodySmall
                                         )

@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Urge Processor"
+rootProject.name = "Reset"
 include(":app")
