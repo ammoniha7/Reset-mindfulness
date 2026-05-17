@@ -162,6 +162,17 @@ fun getCustomColor(context: Context, key: String, default: Color): Color {
 
 fun Color.toHexString(): String = String.format("#%08X", this.toArgb())
 
+fun getDatabaseSize(context: Context): String {
+    val dbFile = context.getDatabasePath("urge_db")
+    if (!dbFile.exists()) return "0 KB"
+    val bytes = dbFile.length()
+    return when {
+        bytes >= 1024 * 1024 -> String.format("%.2f MB", bytes.toDouble() / (1024 * 1024))
+        bytes >= 1024 -> String.format("%.1f KB", bytes.toDouble() / 1024)
+        else -> "$bytes Bytes"
+    }
+}
+
 // --- MAIN ACTIVITY ---
 
 class MainActivity : ComponentActivity() {
@@ -274,7 +285,9 @@ class MainActivity : ComponentActivity() {
                                             .remove("calendar_urge_color")
                                             .remove("calendar_both_color").apply()
                                     },
-                                    onBack = { currentDest = AppDestinations.FLOW }
+                                    onBack = { currentDest = AppDestinations.FLOW },
+                                    journalCount = db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList()).value.size,
+                                    urgeCount = db.urgeDao().getAllEntries().collectAsState(initial = emptyList()).value.size
                                 )
                             }
                         }
@@ -601,7 +614,8 @@ fun StandardJournalScreen(
     
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("export_prefs", Context.MODE_PRIVATE) }
-    var text by remember { mutableStateOf("") }
+    val journalPrefs = remember { context.getSharedPreferences("journal_prefs", Context.MODE_PRIVATE) }
+    var text by rememberSaveable { mutableStateOf(journalPrefs.getString("journal_draft", "") ?: "") }
     val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
 
@@ -638,19 +652,6 @@ fun StandardJournalScreen(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Calendar")
                 }
-                // Copy to Clipboard Button
-                IconButton(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    val textToCopy = entries.joinToString("\n\n") { entry ->
-                        val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
-                        "$date\n${entry.content}"
-                    }
-                    val clip = android.content.ClipData.newPlainText("Journal Entries", textToCopy)
-                    clipboard.setPrimaryClip(clip)
-                    android.widget.Toast.makeText(context, "Journal copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
-                }) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy All")
-                }
             }
         }
 
@@ -658,7 +659,10 @@ fun StandardJournalScreen(
 
         OutlinedTextField(
             value = text,
-            onValueChange = { text = it },
+            onValueChange = { 
+                text = it
+                journalPrefs.edit().putString("journal_draft", it).apply()
+            },
             modifier = Modifier.fillMaxWidth().height(250.dp),
             placeholder = { Text("Write your thoughts here...") },
             shape = RoundedCornerShape(12.dp),
@@ -689,6 +693,9 @@ fun StandardJournalScreen(
                     if (text.isNotBlank()) {
                         scope.launch {
                             val normalizedTimestamp = Calendar.getInstance().apply {
+                                if (get(Calendar.HOUR_OF_DAY) < 4) {
+                                    add(Calendar.DAY_OF_YEAR, -1)
+                                }
                                 set(Calendar.HOUR_OF_DAY, 0)
                                 set(Calendar.MINUTE, 0)
                                 set(Calendar.SECOND, 0)
@@ -696,6 +703,7 @@ fun StandardJournalScreen(
                             }.timeInMillis
                             db.urgeDao().insertStandardJournal(StandardJournalEntry(timestamp = normalizedTimestamp, content = text))
                             text = ""
+                            journalPrefs.edit().remove("journal_draft").apply()
                         }
                     }
                 }
@@ -1644,22 +1652,26 @@ fun SettingsScreen(
     bothColor: Color,
     onBothColorChange: (Color) -> Unit,
     onResetCalendarColors: () -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    journalCount: Int,
+    urgeCount: Int
 ) {
+    val context = LocalContext.current
     var showColorPicker by remember { mutableStateOf(false) }
     var showCalendarPicker by remember { mutableStateOf(false) }
     var pickingFor by remember { mutableStateOf("") } // "theme", "journal", "urge", "both"
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         }
         
         Spacer(modifier = Modifier.height(24.dp))
         
+        Text("Appearance", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
         Card(modifier = Modifier.fillMaxWidth()) {
             Column {
                 Row(
@@ -1717,6 +1729,17 @@ fun SettingsScreen(
                         Box(modifier = Modifier.size(16.dp).clip(CircleShape).background(bothColor))
                     }
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("Storage & Stats", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                StorageRow(Icons.Default.SdStorage, "Total Database Size", getDatabaseSize(context))
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                StorageRow(Icons.Default.EditNote, "Journal Entries", journalCount.toString())
+                StorageRow(Icons.Default.Psychology, "Urge Records", urgeCount.toString())
             }
         }
     }
@@ -1778,6 +1801,22 @@ fun SettingsScreen(
             showReset = pickingFor == "theme",
             onDismiss = { showColorPicker = false }
         )
+    }
+}
+
+@Composable
+fun StorageRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
     }
 }
 
