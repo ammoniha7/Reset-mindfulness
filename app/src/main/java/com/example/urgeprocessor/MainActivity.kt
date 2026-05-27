@@ -1287,6 +1287,7 @@ fun JournalCalendarView(
 
     if (selectedDate != null) {
         DayEntriesDialog(
+            db = db,
             date = selectedDate!!,
             journalEntries = journalEntries,
             urgeEntries = urgeEntries,
@@ -1556,6 +1557,7 @@ fun SearchResultCard(result: SearchResult, journalColor: Color, urgeColor: Color
 
 @Composable
 fun DayEntriesDialog(
+    db: AppDatabase,
     date: Date,
     journalEntries: List<StandardJournalEntry>,
     urgeEntries: List<UrgeEntry>,
@@ -1576,12 +1578,58 @@ fun DayEntriesDialog(
 
     val dayJournals = journalEntries.filter { it.timestamp in startTime until endTime }
     val dayUrges = urgeEntries.filter { it.timestamp in startTime until endTime }
+    
+    var showAddJournal by remember { mutableStateOf(false) }
+    var newJournalText by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(dateFormat.format(date)) },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(dateFormat.format(date), modifier = Modifier.weight(1f))
+                IconButton(onClick = { showAddJournal = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Journal Entry")
+                }
+            }
+        },
         text = {
-            LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+            Column {
+                if (showAddJournal) {
+                    OutlinedTextField(
+                        value = newJournalText,
+                        onValueChange = { newJournalText = it },
+                        modifier = Modifier.fillMaxWidth().height(150.dp).padding(bottom = 16.dp),
+                        placeholder = { Text("Add a thought for this day...") },
+                        shape = RoundedCornerShape(8.dp),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { 
+                            showAddJournal = false
+                            newJournalText = ""
+                        }) { Text("Cancel") }
+                        Button(onClick = {
+                            if (newJournalText.isNotBlank()) {
+                                scope.launch {
+                                    db.urgeDao().insertStandardJournal(StandardJournalEntry(timestamp = startTime, content = newJournalText))
+                                    newJournalText = ""
+                                    showAddJournal = false
+                                }
+                            }
+                        }) { Text("Save") }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                }
+
+                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
                 if (dayJournals.isNotEmpty()) {
                     item { Text("Journal Entries", fontWeight = FontWeight.Bold, color = journalColor, modifier = Modifier.padding(vertical = 8.dp)) }
                     items(dayJournals) { entry ->
@@ -1632,11 +1680,12 @@ fun DayEntriesDialog(
                     item { Text("No entries for this day.") }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
         }
-    )
+    },
+    confirmButton = {
+        TextButton(onClick = onDismiss) { Text("Close") }
+    }
+)
 }
 
 @Composable
