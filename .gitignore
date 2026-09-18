@@ -1,0 +1,29 @@
+# Gradle and Android build output
+.gradle/
+.kotlin/
+**/build/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+
+# Local SDK paths and editor state
+local.properties
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Signing credentials and local secrets
+*.jks
+*.keystore
+keystore.properties
+key.properties
+.env
+.env.*
+!.env.example
+
+# Local agent configuration
+.codex/
+.agents/
