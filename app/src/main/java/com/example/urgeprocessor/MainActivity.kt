@@ -20,7 +20,12 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.urgeprocessor.data.*
 import com.example.urgeprocessor.ui.screens.*
 import com.example.urgeprocessor.ui.theme.ResetTheme
-import kotlinx.coroutines.flow.first
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 // --- MAIN ACTIVITY ---
 
@@ -28,6 +33,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val db = AppDatabase.getDatabase(this)
+        val drafts = JournalDraftStore.get(this)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Also catches up after force-stop, sleep, or a clock change. No database
+                // access occurs here unless there is an overdue draft to save.
+                while (isActive) {
+                    drafts.saveIfDue()
+                    delay(1_000)
+                }
+            }
+        }
         enableEdgeToEdge()
         setContent {
             val context = LocalContext.current

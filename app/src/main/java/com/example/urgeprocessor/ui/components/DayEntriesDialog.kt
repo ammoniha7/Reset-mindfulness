@@ -1,5 +1,6 @@
 package com.example.urgeprocessor.ui.components
 
+import com.example.urgeprocessor.util.nextDayStart
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -81,7 +82,7 @@ fun DayEntriesDialog(
         set(Calendar.SECOND, 0)
         set(Calendar.MILLISECOND, 0)
     }.timeInMillis
-    val endTime = startTime + 24 * 60 * 60 * 1000L
+    val endTime = nextDayStart(startTime)
 
     val dayJournals = journalEntries.filter { it.timestamp in startTime until endTime }
     val dayUrges = urgeEntries.filter { it.timestamp in startTime until endTime }

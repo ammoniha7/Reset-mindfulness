@@ -52,14 +52,3 @@ fun getDatabaseSize(context: Context): String {
         else -> "$bytes Bytes"
     }
 }
-
-fun calculateStreak(entries: List<com.example.urgeprocessor.data.UrgeEntry>): Int {
-    if (entries.isEmpty()) return 0
-    val today = java.util.Calendar.getInstance().apply { set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0) }.timeInMillis
-    val uniqueDays = entries.map { java.util.Calendar.getInstance().apply { timeInMillis = it.timestamp; set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0) }.timeInMillis }.distinct().sortedDescending()
-    var streak = 0
-    val firstDay = uniqueDays.firstOrNull() ?: return 0
-    var checkDate = if (firstDay == today) today else if (firstDay == today - 86400000L) today - 86400000L else return 0
-    for (day in uniqueDays) { if (day == checkDate) { streak++; checkDate -= 86400000L } else break }
-    return streak
-}

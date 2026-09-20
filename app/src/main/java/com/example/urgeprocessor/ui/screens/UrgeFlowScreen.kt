@@ -1,5 +1,6 @@
 package com.example.urgeprocessor.ui.screens
 
+import com.example.urgeprocessor.util.entryTimestamp
 import android.content.Context
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -175,12 +176,7 @@ fun UrgeFlowScreen(db: AppDatabase, onNavigateToSettings: () -> Unit) {
             FlowStep.STRESS -> QuestionTemplate("What's causing you stress right now?", entry.stressReason, { entry = entry.copy(stressReason = it) }, { step = FlowStep.EXCITEMENT })
             FlowStep.EXCITEMENT -> QuestionTemplate("What are you excited for this week?", entry.excitementWeek, { entry = entry.copy(excitementWeek = it) }, { 
                 scope.launch { 
-                    val normalizedEntry = entry.copy(timestamp = Calendar.getInstance().apply {
-                        set(Calendar.HOUR_OF_DAY, 0)
-                        set(Calendar.MINUTE, 0)
-                        set(Calendar.SECOND, 0)
-                        set(Calendar.MILLISECOND, 0)
-                    }.timeInMillis)
+                    val normalizedEntry = entry.copy(timestamp = entryTimestamp())
                     db.urgeDao().insert(normalizedEntry); 
                     step = FlowStep.COMPLETE 
                 } 

@@ -2,6 +2,7 @@ package com.example.urgeprocessor.data
 
 import androidx.room.Dao
 import androidx.room.Delete
+import androidx.room.OnConflictStrategy
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
@@ -18,6 +19,10 @@ interface UrgeDao {
     @Query("SELECT * FROM quotes")
     fun getAllQuotes(): Flow<List<Quote>>
     @Delete suspend fun deleteQuote(quote: Quote): Int
+
+    // A retry after process death must not save the same draft twice.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertJournalDraft(entry: StandardJournalEntry): Long
 
     @Insert suspend fun insertStandardJournal(entry: StandardJournalEntry): Long
     @Query("SELECT * FROM standard_journal ORDER BY timestamp DESC")

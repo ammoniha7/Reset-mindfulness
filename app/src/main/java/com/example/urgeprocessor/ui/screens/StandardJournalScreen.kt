@@ -14,18 +14,23 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.example.urgeprocessor.data.AppDatabase
-import com.example.urgeprocessor.data.StandardJournalEntry
+import com.example.urgeprocessor.data.DraftSaveResult
+import com.example.urgeprocessor.data.JournalDraftStore
 import com.example.urgeprocessor.ui.components.ExportSettingsDialog
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -35,36 +40,46 @@ fun StandardJournalScreen(
     onNavigateToCalendar: () -> Unit,
     onNavigateToImport: () -> Unit
 ) {
-    val entries by db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList())
-    
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val prefs = remember { context.getSharedPreferences("export_prefs", Context.MODE_PRIVATE) }
-    val journalPrefs = remember { context.getSharedPreferences("journal_prefs", Context.MODE_PRIVATE) }
-    var text by rememberSaveable { mutableStateOf(journalPrefs.getString("journal_draft", "") ?: "") }
+    val drafts = remember { JournalDraftStore.get(context) }
+    val draftState by drafts.state.collectAsState()
     val scope = rememberCoroutineScope()
     var showExportDialog by remember { mutableStateOf(false) }
 
-    val createDocumentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/plain"),
-        onResult = { uri: Uri? ->
-            uri?.let {
-                scope.launch {
-                    val exportText = prefs.getString("pending_export_text", "") ?: ""
-                    try {
-                        context.contentResolver.openOutputStream(it)?.use { stream ->
-                            stream.write(exportText.toByteArray())
-                        }
-                        val lastDate = prefs.getLong("pending_export_timestamp", 0L)
-                        if (lastDate != 0L) {
-                            prefs.edit().putLong("last_export_timestamp", lastDate).apply()
-                        }
-                        Toast.makeText(context, "Export successful", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Error saving file", Toast.LENGTH_SHORT).show()
-                    }
+    fun finishExport(uri: Uri?) {
+        if (uri == null) {
+            prefs.edit().remove("pending_export_text").remove("pending_export_timestamp").apply()
+            return
+        }
+        scope.launch {
+            try {
+                val exportText = prefs.getString("pending_export_text", null)
+                    ?: error("No pending export")
+                withContext(Dispatchers.IO) {
+                    val stream = context.contentResolver.openOutputStream(uri, "wt")
+                        ?: error("Could not open destination")
+                    stream.use { it.write(exportText.toByteArray(Charsets.UTF_8)) }
                 }
+                prefs.edit().putLong("last_export_timestamp", System.currentTimeMillis()).apply()
+                Toast.makeText(context, "Export successful", Toast.LENGTH_SHORT).show()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(context, "Export failed. Please try again.", Toast.LENGTH_LONG).show()
+            } finally {
+                prefs.edit().remove("pending_export_text").remove("pending_export_timestamp").apply()
             }
         }
+    }
+
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"), ::finishExport
+    )
+    val createBackupLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"), ::finishExport
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -83,15 +98,22 @@ fun StandardJournalScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedTextField(
-            value = text,
-            onValueChange = { 
-                text = it
-                journalPrefs.edit().putString("journal_draft", it).apply()
+            value = draftState.text,
+            onValueChange = {
+                if (!drafts.updateText(it)) scope.launch { drafts.saveIfDue() }
             },
+            enabled = !draftState.saving,
             modifier = Modifier.fillMaxWidth().height(250.dp),
             placeholder = { Text("Write your thoughts here...") },
             shape = RoundedCornerShape(12.dp),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+        )
+
+        Text(
+            text = draftState.error ?: draftState.message ?: "Unsent entries save automatically at 4 a.m. for the previous day.",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (draftState.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp)
         )
 
         Row(
@@ -115,24 +137,15 @@ fun StandardJournalScreen(
             
             Button(
                 onClick = {
-                    if (text.isNotBlank()) {
-                        scope.launch {
-                            val normalizedTimestamp = Calendar.getInstance().apply {
-                                if (get(Calendar.HOUR_OF_DAY) < 4) {
-                                    add(Calendar.DAY_OF_YEAR, -1)
-                                }
-                                set(Calendar.HOUR_OF_DAY, 0)
-                                set(Calendar.MINUTE, 0)
-                                set(Calendar.SECOND, 0)
-                                set(Calendar.MILLISECOND, 0)
-                            }.timeInMillis
-                            db.urgeDao().insertStandardJournal(StandardJournalEntry(timestamp = normalizedTimestamp, content = text))
-                            text = ""
-                            journalPrefs.edit().remove("journal_draft").apply()
+                    scope.launch {
+                        if (drafts.saveManually() == DraftSaveResult.SAVED) {
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
                         }
                     }
-                }
-            ) { Text("Save Entry") }
+                },
+                enabled = draftState.text.isNotBlank() && !draftState.saving
+            ) { Text(if (draftState.saving) "Saving…" else "Save Entry") }
         }
     }
 
@@ -141,13 +154,14 @@ fun StandardJournalScreen(
             db = db,
             prefs = prefs,
             onDismiss = { showExportDialog = false },
-            onExportStart = { exportText, timestamp ->
+            onExportStart = { exportText, timestamp, backup ->
                 prefs.edit()
                     .putString("pending_export_text", exportText)
                     .putLong("pending_export_timestamp", timestamp)
                     .apply()
                 val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(timestamp))
-                createDocumentLauncher.launch("Journal_Export_$dateStr.txt")
+                if (backup) createBackupLauncher.launch("Reset_Backup_$dateStr.json")
+                else createDocumentLauncher.launch("Journal_Export_$dateStr.txt")
                 showExportDialog = false
             }
         )

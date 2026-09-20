@@ -1,5 +1,6 @@
 package com.example.urgeprocessor.data
 
+import androidx.room.Index
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -18,9 +19,10 @@ data class UrgeEntry(
 @Entity(tableName = "quotes")
 data class Quote(@PrimaryKey(autoGenerate = true) val id: Int = 0, val text: String)
 
-@Entity(tableName = "standard_journal")
+@Entity(tableName = "standard_journal", indices = [Index(value = ["sourceDraftId"], unique = true)])
 data class StandardJournalEntry(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val timestamp: Long = System.currentTimeMillis(),
-    val content: String
+    val content: String,
+    val sourceDraftId: String? = null
 )

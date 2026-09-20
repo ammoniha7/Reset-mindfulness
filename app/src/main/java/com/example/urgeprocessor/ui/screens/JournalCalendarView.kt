@@ -1,5 +1,6 @@
 package com.example.urgeprocessor.ui.screens
 
+import com.example.urgeprocessor.util.nextDayStart
 import android.content.Context
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -40,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import com.example.urgeprocessor.data.AppDatabase
 import com.example.urgeprocessor.data.StandardJournalEntry
 import com.example.urgeprocessor.data.UrgeEntry
+import java.time.LocalDate
+import com.example.urgeprocessor.ui.components.OnThisDayDialog
 import com.example.urgeprocessor.ui.components.DayEntriesDialog
 import com.example.urgeprocessor.ui.components.EditJournalDialog
 import com.example.urgeprocessor.ui.components.MonthYearPickerDialog
@@ -84,6 +87,7 @@ fun JournalCalendarView(
     val yearFormat = SimpleDateFormat("yyyy", Locale.getDefault())
     var swipeOffsetX by remember { mutableFloatStateOf(0f) }
     
+    var pastDay by remember { mutableStateOf<LocalDate?>(null) }
     var showMonthPicker by remember { mutableStateOf(false) }
     var showYearPicker by remember { mutableStateOf(false) }
     var selectedDate by remember { mutableStateOf<Date?>(null) }
@@ -327,7 +331,7 @@ fun JournalCalendarView(
                                         set(Calendar.MILLISECOND, 0)
                                     }
                                     val startTime = currentDayCal.timeInMillis
-                                    val endTime = startTime + 24 * 60 * 60 * 1000L
+                                    val endTime = nextDayStart(startTime)
 
                                     val hasJournal = journalEntries.any { it.timestamp in startTime until endTime }
                                     val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
@@ -417,13 +421,19 @@ fun JournalCalendarView(
                 }
             }
         } else {
-            // Chronological Month List
-            Text(
-                text = "${monthFormat.format(calendar.time)} Records",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "${monthFormat.format(calendar.time)} Records",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { pastDay = LocalDate.now() }) { Text("On This Day") }
+            }
 
             if (combinedList.isEmpty()) {
                 Text("No entries for this month.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
@@ -499,6 +509,11 @@ fun JournalCalendarView(
         }
         
         Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    pastDay?.let { date ->
+        OnThisDayDialog(date, journalEntries, urgeEntries, journalColor, urgeColor,
+            onDismiss = { pastDay = null })
     }
 
     if (selectedDate != null) {
