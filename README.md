@@ -6,13 +6,13 @@ built with Kotlin and Jetpack Compose.
 ## Screenshots
 
 <p>
-  <img src="journal-entry.png" alt="Journal entry screen" width="240">
-  <img src="breathing.png" alt="Guided breathing exersises " width="240">
-  <img src="breathing-in-progress.png" alt="" width="240">
-  <img src="calendar.png" alt="Calendar showing saved entries" width="240">
-  <img src="calendar-entry.png" alt="Calendar entry view" width="240">
-  <img src="main-page.png" alt="Urge counter with urge flow process" width="240">
-  <img src="settings.png" alt="Settings and color customize" width="240">
+  <img src="screenshots/journal-entry.png" alt="Journal entry screen" width="240">
+  <img src="screenshots/breathing.png" alt="Guided breathing exercises" width="240">
+  <img src="screenshots/breathing-in-progress.png" alt="Breathing exercise in progress" width="240">
+  <img src="screenshots/calendar.png" alt="Calendar showing saved entries" width="240">
+  <img src="screenshots/calendar-entry.png" alt="Calendar entry view" width="240">
+  <img src="screenshots/main-page.png" alt="Main screen with urge counter" width="240">
+  <img src="screenshots/settings.png" alt="Settings and color customization" width="240">
 </p>
 
 ## Features
