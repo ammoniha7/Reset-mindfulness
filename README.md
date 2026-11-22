@@ -127,3 +127,15 @@ For future changes, add an explicit migration (or a reviewed Room auto-migration
 ### On This Day
 
 The button beside the calendar’s month Records heading opens journal and urge entries from today’s month and day in earlier years, grouped newest year first. It uses the current local calendar date regardless of the month being browsed. Current-year entries are excluded; February 29 matches only earlier February 29 dates. The view shows complete text and an empty-state message when there are no matches.
+
+## Screenshots
+
+<p>
+  <img src="screenshots/journal-entry.png" alt="Journal entry screen" width="240">
+  <img src="screenshots/breathing.png" alt="Guided breathing exercises" width="240">
+  <img src="screenshots/breathing-in-progress.png" alt="Breathing exercise in progress" width="240">
+  <img src="screenshots/calendar.png" alt="Calendar showing saved entries" width="240">
+  <img src="screenshots/calendar-entry.png" alt="Calendar entry view" width="240">
+  <img src="screenshots/main-page.png" alt="Main screen with urge counter" width="240">
+  <img src="screenshots/settings.png" alt="Settings and color customization" width="240">
+</p>
