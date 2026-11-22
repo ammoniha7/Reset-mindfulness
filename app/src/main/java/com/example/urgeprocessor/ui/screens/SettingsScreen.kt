@@ -1,6 +1,10 @@
 package com.example.urgeprocessor.ui.screens
 
 import android.content.Context
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.example.urgeprocessor.util.validUrgeHoldSeconds
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +43,8 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(
+    urgeHoldSeconds: Int,
+    onUrgeHoldSecondsChange: (Int) -> Unit,
     isDarkMode: Boolean,
     onDarkModeChange: (Boolean) -> Unit,
     customThemeColor: Color?,
@@ -75,6 +81,26 @@ fun SettingsScreen(
         
         Spacer(modifier = Modifier.height(24.dp))
         
+        Text("Urge Counter", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        Card(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp)) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                var durationText by rememberSaveable(urgeHoldSeconds) { mutableStateOf(urgeHoldSeconds.toString()) }
+                val duration = validUrgeHoldSeconds(durationText)
+                Text("Current hold time: $urgeHoldSeconds seconds")
+                OutlinedTextField(
+                    value = durationText,
+                    onValueChange = { durationText = it },
+                    label = { Text("Hold duration (seconds)") },
+                    supportingText = { Text("Enter a whole number from 1 to 500.") },
+                    isError = duration == null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(onClick = { duration?.let(onUrgeHoldSecondsChange) },
+                    enabled = duration != null && duration != urgeHoldSeconds) { Text("Save hold time") }
+            }
+        }
         Text("Appearance", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
         Card(modifier = Modifier.fillMaxWidth()) {
             Column {

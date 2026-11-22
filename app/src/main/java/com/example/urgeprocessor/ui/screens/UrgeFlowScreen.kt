@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,7 +27,7 @@ import com.example.urgeprocessor.data.UrgeEntry
 import com.example.urgeprocessor.ui.components.ColorPickerDialog
 import com.example.urgeprocessor.ui.components.DailyQuoteSection
 import com.example.urgeprocessor.ui.components.QuestionTemplate
-import com.example.urgeprocessor.util.calculateStreak
+import com.example.urgeprocessor.ui.components.UrgeHoldButton
 import com.example.urgeprocessor.util.getCustomColor
 import com.example.urgeprocessor.util.saveCustomColor
 import com.example.urgeprocessor.util.toHexString
@@ -35,14 +36,11 @@ import java.util.*
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun UrgeFlowScreen(db: AppDatabase, onNavigateToSettings: () -> Unit) {
+fun UrgeFlowScreen(db: AppDatabase, holdSeconds: Int, onNavigateToSettings: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var step by remember { mutableStateOf(FlowStep.CATEGORY) }
     var entry by remember { mutableStateOf(UrgeEntry()) }
-
-    // Collecting entries here so we can calculate the streak
-    val entries by db.urgeDao().getAllEntries().collectAsState(initial = emptyList())
 
     var color1 by remember { mutableStateOf(getCustomColor(context, "color1", Color(0xFFEF5350))) }
     var color2 by remember { mutableStateOf(getCustomColor(context, "color2", Color(0xFF42A5F5))) }
@@ -73,73 +71,52 @@ fun UrgeFlowScreen(db: AppDatabase, onNavigateToSettings: () -> Unit) {
 
                 DailyQuoteSection(db)
 
-                // Moved Streak Counter
                 Spacer(modifier = Modifier.height(24.dp))
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.LocalFireDepartment, contentDescription = "Streak", tint = Color.Red, modifier = Modifier.size(28.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Current Streak: ${calculateStreak(entries)} Days", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // New Processed Successfully Counter
-                        var processedCount by remember {
-                            val prefs = context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE)
-                            mutableIntStateOf(prefs.getInt("processed_count", 0))
-                        }
-
+                var processedCount by remember {
+                    val prefs = context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE)
+                    mutableIntStateOf(prefs.getInt("processed_count", 0))
+                }
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    // Equal side widths keep the hold button centered independently of the counter.
+                    Spacer(Modifier.weight(1f))
+                    UrgeHoldButton(seconds = holdSeconds, onComplete = {
+                        processedCount++
+                        context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE)
+                            .edit().putInt("processed_count", processedCount).apply()
+                    })
+                    Box(modifier = Modifier.weight(1f).height(180.dp).padding(start = 8.dp)) {
+                        Text(
+                            text = processedCount.toString(),
+                            modifier = Modifier.align(Alignment.Center),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center
+                        )
                         Column(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.align(Alignment.Center).offset(y = 52.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Text("Processed Successfully", style = MaterialTheme.typography.bodyLarge)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                IconButton(onClick = {
-                                    if (processedCount > 0) {
-                                        processedCount--
-                                        context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE).edit().putInt("processed_count", processedCount).apply()
-                                    }
-                                }) {
-                                    Icon(Icons.Default.Remove, contentDescription = "Decrease", tint = MaterialTheme.colorScheme.primary)
+                            IconButton(onClick = {
+                                if (processedCount > 0) {
+                                    processedCount--
+                                    context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE)
+                                        .edit().putInt("processed_count", processedCount).apply()
                                 }
-                                IconButton(onClick = {
-                                    processedCount++
-                                    context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE).edit().putInt("processed_count", processedCount).apply()
-                                }) {
-                                    Icon(Icons.Default.Add, contentDescription = "Increase", tint = MaterialTheme.colorScheme.primary)
-                                }
+                            }) {
+                                Icon(Icons.Default.Remove, contentDescription = "Decrease", tint = MaterialTheme.colorScheme.primary)
                             }
-                            
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = processedCount.toString(),
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    text = "Reset",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.clickable {
-                                        processedCount = 0
-                                        context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE).edit().putInt("processed_count", 0).apply()
-                                    }
-                                )
+                            OutlinedButton(
+                                onClick = {
+                                    processedCount = 0
+                                    context.getSharedPreferences("counter_prefs", Context.MODE_PRIVATE)
+                                        .edit().putInt("processed_count", 0).apply()
+                                },
+                                modifier = Modifier.height(32.dp).defaultMinSize(minWidth = 1.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Text("Reset", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }

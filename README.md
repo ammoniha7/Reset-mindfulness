@@ -139,3 +139,7 @@ The button beside the calendar’s month Records heading opens journal and urge 
   <img src="screenshots/main-page.png" alt="Main screen with urge counter" width="240">
   <img src="screenshots/settings.png" alt="Settings and color customization" width="240">
 </p>
+
+## Hold-to-process counter
+
+The home screen's urge counter increases after one continuous hold (90 seconds by default). Settings → Urge Counter accepts a whole number from 1 to 500 seconds; tap Save hold time to apply it. A progress ring and countdown show the remaining time, and completion plays a short vibration pattern. The circular button follows the selected theme color, with the count and decrease/reset controls to its right. Lift your finger before starting another hold. Releasing early, moving off the button, adding a second finger, or leaving the app cancels progress. The screen stays awake during a hold. Existing counter totals, decrease, and reset controls are preserved.

@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import com.example.urgeprocessor.data.*
+import com.example.urgeprocessor.util.DEFAULT_URGE_HOLD_SECONDS
+import com.example.urgeprocessor.util.URGE_HOLD_SECONDS_KEY
 import com.example.urgeprocessor.audio.RecordingController
 import com.example.urgeprocessor.ui.components.RecordingDialog
 import com.example.urgeprocessor.ui.screens.*
@@ -58,6 +60,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             val context = LocalContext.current
             val prefs = remember { context.getSharedPreferences("settings_prefs", Context.MODE_PRIVATE) }
+            var urgeHoldSeconds by remember {
+                mutableIntStateOf(prefs.getInt(URGE_HOLD_SECONDS_KEY, DEFAULT_URGE_HOLD_SECONDS).coerceIn(1, 500))
+            }
             var isDarkMode by rememberSaveable { mutableStateOf(prefs.getBoolean("dark_mode", false)) }
             var customThemeColor by remember {
                 val colorInt = prefs.getInt("theme_color", -1)
@@ -107,7 +112,7 @@ class MainActivity : ComponentActivity() {
                     Scaffold { innerPadding ->
                         Box(modifier = Modifier.padding(innerPadding)) {
                             when (currentDest) {
-                                AppDestinations.FLOW -> UrgeFlowScreen(db, onNavigateToSettings = { currentDest = AppDestinations.SETTINGS })
+                                AppDestinations.FLOW -> UrgeFlowScreen(db, holdSeconds = urgeHoldSeconds, onNavigateToSettings = { currentDest = AppDestinations.SETTINGS })
                                 AppDestinations.BREATHE -> BreathingScreen()
                                 AppDestinations.JOURNAL -> StandardJournalScreen(
                                     db = db,
@@ -132,6 +137,11 @@ class MainActivity : ComponentActivity() {
                                     resetTrigger = calendarResetTrigger
                                 )
                                 AppDestinations.SETTINGS -> SettingsScreen(
+                                    urgeHoldSeconds = urgeHoldSeconds,
+                                    onUrgeHoldSecondsChange = { seconds ->
+                                        urgeHoldSeconds = seconds.coerceIn(1, 500)
+                                        prefs.edit().putInt(URGE_HOLD_SECONDS_KEY, urgeHoldSeconds).apply()
+                                    },
                                     isDarkMode = isDarkMode,
                                     onDarkModeChange = { 
                                         isDarkMode = it
