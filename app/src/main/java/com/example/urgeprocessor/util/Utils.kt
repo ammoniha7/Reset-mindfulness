@@ -6,7 +6,6 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import java.io.File
 
 fun triggerVibration(context: Context, type: String) {
     val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
@@ -41,14 +40,3 @@ fun getCustomColor(context: Context, key: String, default: Color): Color {
 }
 
 fun Color.toHexString(): String = String.format("#%08X", this.toArgb())
-
-fun getDatabaseSize(context: Context): String {
-    val dbFile = context.getDatabasePath("urge_db")
-    if (!dbFile.exists()) return "0 KB"
-    val bytes = dbFile.length()
-    return when {
-        bytes >= 1024 * 1024 -> String.format("%.2f MB", bytes.toDouble() / (1024 * 1024))
-        bytes >= 1024 -> String.format("%.1f KB", bytes.toDouble() / 1024)
-        else -> "$bytes Bytes"
-    }
-}

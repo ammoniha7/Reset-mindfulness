@@ -70,6 +70,8 @@ The current database stores dates as epoch milliseconds, so changing the device'
 
 Open **Journal → Record a moment** to capture audio, pause/resume, stop, preview, optionally title it, and save it. Each recording appears alongside journal entries in the calendar's month records and selected-day dialog, with its original capture date, time, time zone, duration, play/pause, seeking, and confirmed deletion. Recording titles are searchable, and recordings also appear in On This Day.
 
+Tap the playback speed button to cycle through 1×, 1.5×, 2×, and 2.5× in calendar lists, day views, On This Day, and recording previews. Speed changes preserve voice pitch. The selection stays while pausing, resuming, and switching recordings in the same screen; reopening the player starts at 1×.
+
 Microphone access is requested only when starting a recording. Recording and playback work offline. Audio is AAC in M4A files in the app's private storage; Room holds metadata separately, leaving room for future transcripts and trip links. Multiple recordings per day are supported.
 
 Recordings use the existing 4 a.m. journal-day cutoff. Their assigned date, actual capture timestamp, and original time zone are stored separately, so changing time zones does not move them to another calendar day. Captures after midnight can show the previous journal day as well as their actual timestamp.

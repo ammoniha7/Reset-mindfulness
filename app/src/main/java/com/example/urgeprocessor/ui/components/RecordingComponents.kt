@@ -16,6 +16,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -70,6 +72,13 @@ fun RecordingPlayback(entry: RecordingEntry, player: RecordingPlayer) {
             enabled = active && !state.loading && state.error == null,
             modifier = Modifier.weight(1f))
         Text("${audioTime(position)} / ${audioTime(duration)}", style = MaterialTheme.typography.labelSmall)
+    }
+    val speedLabel = "${state.speed.toString().removeSuffix(".0")}×"
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        TextButton(onClick = player::cycleSpeed,
+            modifier = Modifier.semantics { contentDescription = "Playback speed $speedLabel. Tap to change speed" }) {
+            Text(speedLabel)
+        }
     }
     if (active) state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 }

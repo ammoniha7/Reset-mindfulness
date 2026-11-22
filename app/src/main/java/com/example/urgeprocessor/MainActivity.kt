@@ -171,7 +171,8 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onBack = { currentDest = AppDestinations.FLOW },
                                     journalCount = db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList()).value.size,
-                                    urgeCount = db.urgeDao().getAllEntries().collectAsState(initial = emptyList()).value.size
+                                    urgeCount = db.urgeDao().getAllEntries().collectAsState(initial = emptyList()).value.size,
+                                    recordingCount = db.urgeDao().getAllRecordings().collectAsState(initial = emptyList()).value.size
                                 )
                             }
                         }

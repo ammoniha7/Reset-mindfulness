@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SdStorage
@@ -29,7 +30,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.urgeprocessor.ui.components.ThemeColorPickerDialog
-import com.example.urgeprocessor.util.getDatabaseSize
+import com.example.urgeprocessor.data.RecordingFiles
+import com.example.urgeprocessor.util.StorageUsage
+import com.example.urgeprocessor.util.readStorageUsage
+import com.example.urgeprocessor.util.formatStorageSize
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(
@@ -46,9 +52,15 @@ fun SettingsScreen(
     onResetCalendarColors: () -> Unit,
     onBack: () -> Unit,
     journalCount: Int,
-    urgeCount: Int
+    urgeCount: Int,
+    recordingCount: Int
 ) {
     val context = LocalContext.current
+    val storage by produceState<StorageUsage?>(null, context, listOf(journalCount, urgeCount, recordingCount)) {
+        value = withContext(Dispatchers.IO) {
+            readStorageUsage(context.getDatabasePath("urge_db"), RecordingFiles(context).directory)
+        }
+    }
     var showColorPicker by remember { mutableStateOf(false) }
     var showCalendarPicker by remember { mutableStateOf(false) }
     var pickingFor by remember { mutableStateOf("") } // "theme", "journal", "urge", "both"
@@ -128,10 +140,15 @@ fun SettingsScreen(
         Text("Storage & Stats", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                StorageRow(Icons.Default.SdStorage, "Total Database Size", getDatabaseSize(context))
+                StorageRow(Icons.Default.SdStorage, "Total Database Size", storage?.let { formatStorageSize(it.databaseBytes) } ?: "…")
+                StorageRow(Icons.Default.Mic, "Recording Storage", storage?.let { formatStorageSize(it.recordingBytes) } ?: "…")
+                StorageRow(Icons.Default.SdStorage, "Total Storage", storage?.let { formatStorageSize(it.totalBytes) } ?: "…")
+                Text("Total includes database and audio files, including unfinished recordings. App installation, cache, and exported backups are excluded.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 StorageRow(Icons.Default.EditNote, "Journal Entries", journalCount.toString())
                 StorageRow(Icons.Default.Psychology, "Urge Records", urgeCount.toString())
+                StorageRow(Icons.Default.Mic, "Voice Entries", recordingCount.toString())
             }
         }
     }
@@ -203,7 +220,7 @@ fun StorageRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: Str
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.weight(1f).padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(12.dp))
             Text(label, style = MaterialTheme.typography.bodyMedium)

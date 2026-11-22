@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import com.example.urgeprocessor.data.RecordingEntry
 import com.example.urgeprocessor.data.RecordingFiles
 import kotlinx.coroutines.*
@@ -17,6 +18,7 @@ data class PlaybackState(
     val loading: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
+    val speed: Float = 1f,
     val error: String? = null
 )
 
@@ -55,7 +57,7 @@ class RecordingPlayer(context: Context) {
             return
         }
         stop()
-        mutableState.value = PlaybackState(id = entry.id, loading = true, durationMs = entry.durationMs)
+        mutableState.value = PlaybackState(id = entry.id, loading = true, durationMs = entry.durationMs, speed = state.value.speed)
         try {
             val audio = files.file(entry.fileName)
             check(audio.isFile && audio.length() > 0)
@@ -92,9 +94,29 @@ class RecordingPlayer(context: Context) {
                 mutableState.value = state.value.copy(error = "Audio is busy. Try playing again shortly.")
                 return
             }
+            player?.playbackParams = PlaybackParams().setSpeed(state.value.speed).setPitch(1f)
             player?.start()
             mutableState.value = state.value.copy(playing = true, error = null)
         } catch (_: Exception) { fail("Could not play this recording. Please try again.") }
+    }
+
+    fun cycleSpeed() {
+        val speed = when (state.value.speed) {
+            1f -> 1.5f
+            1.5f -> 2f
+            2f -> 2.5f
+            else -> 1f
+        }
+        try {
+            // Setting a nonzero speed can start a paused MediaPlayer. Defer until
+            // startPrepared() unless already playing, including during preparation.
+            if (state.value.playing) {
+                player?.playbackParams = PlaybackParams().setSpeed(speed).setPitch(1f)
+            }
+            mutableState.value = state.value.copy(speed = speed)
+        } catch (_: Exception) {
+            fail("Could not change playback speed. Please try again.")
+        }
     }
 
     fun pause() {
@@ -116,14 +138,14 @@ class RecordingPlayer(context: Context) {
     private fun fail(message: String) {
         val id = state.value.id
         stop()
-        mutableState.value = PlaybackState(id = id, error = message)
+        mutableState.value = PlaybackState(id = id, speed = state.value.speed, error = message)
     }
 
     fun stop() {
         player?.release()
         player = null
         audioManager.abandonAudioFocusRequest(focus)
-        mutableState.value = PlaybackState()
+        mutableState.value = PlaybackState(speed = state.value.speed)
     }
 
     fun release() { stop(); scope.cancel() }
