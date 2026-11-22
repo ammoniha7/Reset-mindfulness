@@ -38,6 +38,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.example.urgeprocessor.data.RecordingEntry
+import com.example.urgeprocessor.ui.components.RecordingCard
+import com.example.urgeprocessor.ui.components.rememberRecordingPlayer
+import com.example.urgeprocessor.util.calendarDate
+import com.example.urgeprocessor.util.dayStart
 import com.example.urgeprocessor.data.AppDatabase
 import com.example.urgeprocessor.data.StandardJournalEntry
 import com.example.urgeprocessor.data.UrgeEntry
@@ -62,8 +67,10 @@ fun JournalCalendarView(
     urgeColor: Color,
     bothColor: Color,
     onBack: () -> Unit,
-    resetTrigger: Long = 0L
+    resetTrigger: Long = 0L,
+    recordingEntries: List<RecordingEntry> = emptyList()
 ) {
+    val recordingPlayer = rememberRecordingPlayer()
     var calendar by remember { mutableStateOf(Calendar.getInstance().apply { 
         set(Calendar.DAY_OF_MONTH, 1)
         set(Calendar.HOUR_OF_DAY, 0)
@@ -119,17 +126,25 @@ fun JournalCalendarView(
     val monthJournalItems = journalEntries.filter { it.timestamp in startOfMonth until endOfMonth }
     val monthUrgeItems = urgeEntries.filter { it.timestamp in startOfMonth until endOfMonth }
     
+    val monthKey = java.time.YearMonth.of(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1).toString()
+    val monthRecordingItems = recordingEntries.filter { it.journalDate.startsWith("$monthKey-") }
+
     // Unified item type for the combined list
     data class CombinedItem(
         val timestamp: Long,
         val id: Int,
         val journal: StandardJournalEntry? = null,
-        val urge: UrgeEntry? = null
+        val urge: UrgeEntry? = null,
+        val recording: RecordingEntry? = null,
+        val orderTime: Long = timestamp
     )
 
     val combinedList = (monthJournalItems.map { CombinedItem(it.timestamp, it.id, journal = it) } +
-            monthUrgeItems.map { CombinedItem(it.timestamp, it.id, urge = it) })
-        .sortedWith(compareBy({ it.timestamp }, { it.id })) // Oldest first, entry order for same day
+            monthUrgeItems.map { CombinedItem(it.timestamp, it.id, urge = it) } +
+            monthRecordingItems.map {
+                CombinedItem(dayStart(LocalDate.parse(it.journalDate)), 0, recording = it, orderTime = it.timestamp)
+            })
+        .sortedWith(compareBy({ calendarDate(it.timestamp) }, { it.orderTime }, { it.id })) // Oldest first, entry order for same day
 
     val scope = rememberCoroutineScope()
     var journalToEdit by remember { mutableStateOf<StandardJournalEntry?>(null) }
@@ -333,7 +348,8 @@ fun JournalCalendarView(
                                     val startTime = currentDayCal.timeInMillis
                                     val endTime = nextDayStart(startTime)
 
-                                    val hasJournal = journalEntries.any { it.timestamp in startTime until endTime }
+                                    val hasRecording = recordingEntries.any { it.journalDate == calendarDate(startTime).toString() }
+                                    val hasJournal = hasRecording || journalEntries.any { it.timestamp in startTime until endTime }
                                     val hasUrge = urgeEntries.any { it.timestamp in startTime until endTime }
                                     val hasDraft = remember(startTime, draftRefreshTrigger) {
                                         journalPrefs.getString("calendar_draft_$startTime", "")
@@ -376,6 +392,11 @@ fun JournalCalendarView(
                                             textDecoration = if (isToday) androidx.compose.ui.text.style.TextDecoration.Underline else null
                                         )
 
+                                        if (hasRecording) {
+                                            Icon(Icons.Default.Mic, contentDescription = "Voice recording",
+                                                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp).size(10.dp),
+                                                tint = Color.White)
+                                        }
                                         if (hasDraft) {
                                             Icon(
                                                 imageVector = Icons.Default.Description,
@@ -411,7 +432,15 @@ fun JournalCalendarView(
                 performSearch(activeSearchQuery, journalEntries, urgeEntries)
             }
 
-            if (searchResults.isEmpty()) {
+            val matchingRecordings = recordingEntries.filter {
+                it.title.ifBlank { "Voice recording" }.contains(activeSearchQuery, ignoreCase = true)
+            }
+            matchingRecordings.forEach { entry ->
+                key("recording-search-${entry.id}") {
+                    RecordingCard(entry, recordingPlayer, db, Modifier.padding(bottom = 12.dp))
+                }
+            }
+            if (searchResults.isEmpty() && matchingRecordings.isEmpty()) {
                 Text("No matches found for \"$searchQuery\"", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             } else {
                 searchResults.forEach { result ->
@@ -439,7 +468,11 @@ fun JournalCalendarView(
                 Text("No entries for this month.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             } else {
                 combinedList.forEach { item ->
-                    if (item.urge != null) {
+                    if (item.recording != null) {
+                        key("recording-${item.recording.id}") {
+                            RecordingCard(item.recording, recordingPlayer, db, Modifier.padding(bottom = 12.dp))
+                        }
+                    } else if (item.urge != null) {
                         val entry = item.urge
                         val date = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(entry.timestamp))
                         val col = try { Color(android.graphics.Color.parseColor(entry.emotionColor)) } catch(e: Exception) { Color.Gray }
@@ -511,8 +544,11 @@ fun JournalCalendarView(
         Spacer(modifier = Modifier.height(32.dp))
     }
 
+    LaunchedEffect(selectedDate, pastDay) { recordingPlayer.pause() }
+
     pastDay?.let { date ->
         OnThisDayDialog(date, journalEntries, urgeEntries, journalColor, urgeColor,
+            recordings = recordingEntries, player = recordingPlayer, db = db,
             onDismiss = { pastDay = null })
     }
 
@@ -520,6 +556,8 @@ fun JournalCalendarView(
         DayEntriesDialog(
             db = db,
             date = selectedDate!!,
+            recordings = recordingEntries,
+            recordingPlayer = recordingPlayer,
             journalEntries = journalEntries,
             urgeEntries = urgeEntries,
             journalColor = journalColor,

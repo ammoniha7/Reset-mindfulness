@@ -46,6 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.example.urgeprocessor.audio.RecordingPlayer
+import com.example.urgeprocessor.data.RecordingEntry
+import com.example.urgeprocessor.util.calendarDate
 import com.example.urgeprocessor.data.AppDatabase
 import com.example.urgeprocessor.data.StandardJournalEntry
 import com.example.urgeprocessor.data.UrgeEntry
@@ -72,7 +75,9 @@ fun DayEntriesDialog(
     journalColor: Color,
     urgeColor: Color,
     searchQuery: String = "",
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    recordings: List<RecordingEntry> = emptyList(),
+    recordingPlayer: RecordingPlayer? = null
 ) {
     val dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
     val startTime = Calendar.getInstance().apply {
@@ -85,6 +90,7 @@ fun DayEntriesDialog(
     val endTime = nextDayStart(startTime)
 
     val dayJournals = journalEntries.filter { it.timestamp in startTime until endTime }
+    val dayRecordings = recordings.filter { it.journalDate == calendarDate(startTime).toString() }.sortedBy { it.timestamp }
     val dayUrges = urgeEntries.filter { it.timestamp in startTime until endTime }
 
     val context = LocalContext.current
@@ -253,6 +259,12 @@ fun DayEntriesDialog(
                         }
                     }
 
+                    if (recordingPlayer != null) {
+                        items(dayRecordings, key = { "recording-${it.id}" }) { entry ->
+                            RecordingCard(entry, recordingPlayer, db, Modifier.padding(bottom = 8.dp))
+                        }
+                    }
+
                     if (dayUrges.isNotEmpty()) {
                         item {
                             Text(
@@ -319,7 +331,7 @@ fun DayEntriesDialog(
                         }
                     }
 
-                    if (dayJournals.isEmpty() && dayUrges.isEmpty()) {
+                    if (dayJournals.isEmpty() && dayUrges.isEmpty() && dayRecordings.isEmpty()) {
                         item { Text("No entries for this day.") }
                     }
                 }

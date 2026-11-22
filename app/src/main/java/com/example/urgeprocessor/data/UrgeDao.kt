@@ -10,6 +10,14 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UrgeDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertRecording(entry: RecordingEntry): Long
+    @Query("SELECT * FROM recordings ORDER BY journalDate DESC, timestamp DESC")
+    fun getAllRecordings(): Flow<List<RecordingEntry>>
+    @Query("SELECT * FROM recordings WHERE id = :id")
+    suspend fun getRecording(id: String): RecordingEntry?
+    @Delete suspend fun deleteRecording(entry: RecordingEntry): Int
+
     @Insert suspend fun insert(entry: UrgeEntry): Long
     @Query("SELECT * FROM urge_entries ORDER BY timestamp DESC")
     fun getAllEntries(): Flow<List<UrgeEntry>>

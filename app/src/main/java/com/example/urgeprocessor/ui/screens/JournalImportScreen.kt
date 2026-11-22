@@ -10,6 +10,12 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import java.io.File
+import java.util.UUID
+import java.util.zip.ZipFile
+import com.example.urgeprocessor.data.RecordingFiles
+import com.example.urgeprocessor.data.importRecordingBackup
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -27,6 +33,7 @@ import com.example.urgeprocessor.data.importEntries
 fun JournalImportScreen(db: AppDatabase, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var selectedBackupPath by rememberSaveable { mutableStateOf<String?>(null) }
     var inputText by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
     var resultMessage by remember { mutableStateOf<String?>(null) }
@@ -38,11 +45,26 @@ fun JournalImportScreen(db: AppDatabase, onBack: () -> Unit) {
                 isProcessing = true
                 scope.launch {
                     try {
-                        inputText = withContext(Dispatchers.IO) {
-                            val stream = context.contentResolver.openInputStream(it)
-                                ?: error("Could not open file")
-                            stream.bufferedReader(Charsets.UTF_8).use { reader -> reader.readText() }
+                        val selected = withContext(Dispatchers.IO) {
+                            val file = File(context.cacheDir, "entry-import-${UUID.randomUUID()}")
+                            try {
+                                val stream = context.contentResolver.openInputStream(it) ?: error("Could not open file")
+                                stream.use { input -> file.outputStream().use { output -> input.copyTo(output) } }
+                                val zip = file.inputStream().use { input -> input.read() == 0x50 && input.read() == 0x4b }
+                                if (zip) {
+                                    ZipFile(file).use { archive -> check(archive.getEntry("entries.json") != null) }
+                                    file to null
+                                } else {
+                                    check(file.length() <= 8_388_608) { "Text file is too large" }
+                                    val text = file.readText(Charsets.UTF_8)
+                                    file.delete()
+                                    null to text
+                                }
+                            } catch (failure: Throwable) { file.delete(); throw failure }
                         }
+                        selectedBackupPath?.let { File(it).delete() }
+                        selectedBackupPath = selected.first?.path
+                        inputText = selected.second.orEmpty()
                         resultMessage = null
                     } catch (e: CancellationException) {
                         throw e
@@ -65,10 +87,18 @@ fun JournalImportScreen(db: AppDatabase, onBack: () -> Unit) {
         }
 
         Text(
-            "Open a Reset .json backup or an old .txt export (journals and urges), or paste journal text with each entry starting on a new line with MM-DD-YYYY: or MM/DD/YYYY:. Import adds records without replacing existing ones; importing the same file again creates duplicates.",
+            "Open a Reset .zip backup (including recordings), an older .json backup, or a .txt export, or paste journal text with each entry starting on a new line with MM-DD-YYYY: or MM/DD/YYYY:. Import adds records without replacing existing ones; importing the same file again creates duplicates.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(vertical = 8.dp)
         )
+
+        if (selectedBackupPath != null) {
+            Text("Recording backup selected. Tap Start Import to restore it.")
+            TextButton(onClick = {
+                selectedBackupPath?.let { File(it).delete() }
+                selectedBackupPath = null
+            }, enabled = !isProcessing) { Text("Clear selected backup") }
+        }
 
         OutlinedTextField(
             value = inputText,
@@ -76,7 +106,7 @@ fun JournalImportScreen(db: AppDatabase, onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth().weight(1f),
             placeholder = { Text("Paste journal text here...") },
             shape = RoundedCornerShape(8.dp),
-            enabled = !isProcessing
+            enabled = !isProcessing && selectedBackupPath == null
         )
 
         Row(
@@ -84,7 +114,7 @@ fun JournalImportScreen(db: AppDatabase, onBack: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Button(
-                onClick = { filePickerLauncher.launch(arrayOf("text/plain", "application/json", "application/octet-stream")) },
+                onClick = { filePickerLauncher.launch(arrayOf("text/plain", "application/json", "application/zip", "application/x-zip-compressed", "application/octet-stream")) },
                 modifier = Modifier.weight(1f),
                 enabled = !isProcessing,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
@@ -99,7 +129,11 @@ fun JournalImportScreen(db: AppDatabase, onBack: () -> Unit) {
                     isProcessing = true
                     scope.launch {
                         try {
-                            val importedCount = importEntries(db, inputText)
+                            val importedCount = selectedBackupPath?.let {
+                                importRecordingBackup(db, RecordingFiles(context), File(it))
+                            } ?: importEntries(db, inputText)
+                            selectedBackupPath?.let { File(it).delete() }
+                            selectedBackupPath = null
                             resultMessage = "Imported $importedCount records."
                             inputText = ""
                         } catch (e: CancellationException) {
@@ -114,7 +148,7 @@ fun JournalImportScreen(db: AppDatabase, onBack: () -> Unit) {
                     }
                 },
                 modifier = Modifier.weight(1f),
-                enabled = inputText.isNotBlank() && !isProcessing
+                enabled = (inputText.isNotBlank() || selectedBackupPath != null) && !isProcessing
             ) {
                 if (isProcessing) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)

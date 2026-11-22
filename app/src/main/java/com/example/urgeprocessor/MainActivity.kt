@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import com.example.urgeprocessor.data.*
+import com.example.urgeprocessor.audio.RecordingController
+import com.example.urgeprocessor.ui.components.RecordingDialog
 import com.example.urgeprocessor.ui.screens.*
 import com.example.urgeprocessor.ui.theme.ResetTheme
 import androidx.lifecycle.Lifecycle
@@ -30,10 +32,18 @@ import kotlinx.coroutines.launch
 // --- MAIN ACTIVITY ---
 
 class MainActivity : ComponentActivity() {
+    private val recordings by lazy { RecordingController.get(this) }
+
+    override fun onStop() {
+        recordings.stop("Recording stopped when the app left the screen. Your audio is ready to review.")
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val db = AppDatabase.getDatabase(this)
         val drafts = JournalDraftStore.get(this)
+        val recordingController = recordings
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 // Also catches up after force-stop, sleep, or a clock change. No database
@@ -69,7 +79,13 @@ class MainActivity : ComponentActivity() {
             
             ResetTheme(darkTheme = isDarkMode, customColor = customThemeColor) {
                 var currentDest by rememberSaveable { mutableStateOf(AppDestinations.FLOW) }
+                var showRecorder by rememberSaveable { mutableStateOf(recordingController.state.value.draft != null) }
+                val recordingState by recordingController.state.collectAsState()
                 var calendarResetTrigger by remember { mutableLongStateOf(0L) }
+
+                if (showRecorder) {
+                    RecordingDialog(db, recordingController, onDismiss = { showRecorder = false })
+                }
 
                 NavigationSuiteScaffold(
                     navigationSuiteItems = {
@@ -96,7 +112,9 @@ class MainActivity : ComponentActivity() {
                                 AppDestinations.JOURNAL -> StandardJournalScreen(
                                     db = db,
                                     onNavigateToCalendar = { currentDest = AppDestinations.CALENDAR },
-                                    onNavigateToImport = { currentDest = AppDestinations.IMPORT }
+                                    onNavigateToImport = { currentDest = AppDestinations.IMPORT },
+                                    onRecord = { showRecorder = true },
+                                    hasRecordingDraft = recordingState.draft != null
                                 )
                                 AppDestinations.IMPORT -> JournalImportScreen(
                                     db = db,
@@ -105,6 +123,7 @@ class MainActivity : ComponentActivity() {
                                 AppDestinations.CALENDAR -> JournalCalendarView(
                                     db = db,
                                     journalEntries = db.urgeDao().getAllStandardJournals().collectAsState(initial = emptyList()).value,
+                                    recordingEntries = db.urgeDao().getAllRecordings().collectAsState(initial = emptyList()).value,
                                     urgeEntries = db.urgeDao().getAllEntries().collectAsState(initial = emptyList()).value,
                                     journalColor = journalColor,
                                     urgeColor = urgeColor,

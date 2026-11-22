@@ -6,6 +6,9 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -14,6 +17,9 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.example.urgeprocessor.ui.components.DictationDialog
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,6 +29,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import com.example.urgeprocessor.data.RecordingFiles
+import com.example.urgeprocessor.data.writeRecordingBackup
 import com.example.urgeprocessor.data.AppDatabase
 import com.example.urgeprocessor.data.DraftSaveResult
 import com.example.urgeprocessor.data.JournalDraftStore
@@ -38,7 +46,9 @@ import java.util.*
 fun StandardJournalScreen(
     db: AppDatabase,
     onNavigateToCalendar: () -> Unit,
-    onNavigateToImport: () -> Unit
+    onNavigateToImport: () -> Unit,
+    onRecord: () -> Unit,
+    hasRecordingDraft: Boolean = false
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -47,9 +57,11 @@ fun StandardJournalScreen(
     val drafts = remember { JournalDraftStore.get(context) }
     val draftState by drafts.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val dictationDraft by drafts.dictation.collectAsState()
+    var showDictation by rememberSaveable { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
 
-    fun finishExport(uri: Uri?) {
+    fun finishExport(uri: Uri?, backup: Boolean = false) {
         if (uri == null) {
             prefs.edit().remove("pending_export_text").remove("pending_export_timestamp").apply()
             return
@@ -57,11 +69,14 @@ fun StandardJournalScreen(
         scope.launch {
             try {
                 val exportText = prefs.getString("pending_export_text", null)
-                    ?: error("No pending export")
+                check(backup || exportText != null) { "No pending export" }
                 withContext(Dispatchers.IO) {
                     val stream = context.contentResolver.openOutputStream(uri, "wt")
                         ?: error("Could not open destination")
-                    stream.use { it.write(exportText.toByteArray(Charsets.UTF_8)) }
+                    stream.use {
+                        if (backup) writeRecordingBackup(db, RecordingFiles(context), it)
+                        else it.write(exportText!!.toByteArray(Charsets.UTF_8))
+                    }
                 }
                 prefs.edit().putLong("last_export_timestamp", System.currentTimeMillis()).apply()
                 Toast.makeText(context, "Export successful", Toast.LENGTH_SHORT).show()
@@ -76,13 +91,14 @@ fun StandardJournalScreen(
     }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain"), ::finishExport
-    )
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { finishExport(it) }
     val createBackupLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"), ::finishExport
-    )
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { finishExport(it, backup = true) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Daily Journal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
@@ -93,6 +109,19 @@ fun StandardJournalScreen(
                     Text("Calendar")
                 }
             }
+        }
+
+        OutlinedButton(onClick = onRecord, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Mic, null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (hasRecordingDraft) "Review unfinished recording" else "Record a moment")
+        }
+
+        OutlinedButton(onClick = { showDictation = true }, enabled = !draftState.saving,
+            modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.RecordVoiceOver, null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (dictationDraft.text.isBlank()) "Speak to write" else "Review spoken draft")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -149,6 +178,10 @@ fun StandardJournalScreen(
         }
     }
 
+    if (showDictation) {
+        DictationDialog(drafts = drafts, onDismiss = { showDictation = false })
+    }
+
     if (showExportDialog) {
         ExportSettingsDialog(
             db = db,
@@ -160,7 +193,7 @@ fun StandardJournalScreen(
                     .putLong("pending_export_timestamp", timestamp)
                     .apply()
                 val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(timestamp))
-                if (backup) createBackupLauncher.launch("Reset_Backup_$dateStr.json")
+                if (backup) createBackupLauncher.launch("Reset_Backup_$dateStr.zip")
                 else createDocumentLauncher.launch("Journal_Export_$dateStr.txt")
                 showExportDialog = false
             }

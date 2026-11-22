@@ -26,3 +26,15 @@ data class StandardJournalEntry(
     val content: String,
     val sourceDraftId: String? = null
 )
+
+// Capture time and the assigned journal day are separate so travel cannot move a recording.
+@Entity(tableName = "recordings", indices = [Index(value = ["journalDate"])])
+data class RecordingEntry(
+    @PrimaryKey val id: String,
+    val timestamp: Long,
+    val journalDate: String,
+    val zoneId: String,
+    val durationMs: Long,
+    val title: String = "",
+    val fileName: String
+)

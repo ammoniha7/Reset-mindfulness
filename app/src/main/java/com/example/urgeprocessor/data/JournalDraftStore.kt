@@ -26,6 +26,8 @@ data class JournalDraftState(
 
 enum class DraftSaveResult { SAVED, EMPTY, NOT_DUE, BUSY, FAILED }
 
+data class DictationDraftState(val text: String = "", val error: String? = null)
+
 /** One process-wide owner keeps the editor, background worker, and manual save in sync. */
 class JournalDraftStore internal constructor(
     private val db: AppDatabase,
@@ -37,6 +39,11 @@ class JournalDraftStore internal constructor(
     private val lock = Any()
     private val mutableState = MutableStateFlow(load())
     val state = mutableState.asStateFlow()
+    private val mutableDictation = MutableStateFlow(
+        DictationDraftState(prefs.getString(DICTATION_KEY, "").orEmpty())
+    )
+    val dictation = mutableDictation.asStateFlow()
+    private var transferringDictation = false
 
     init { mutableState.value.draft?.let { schedule(it) } }
 
@@ -77,6 +84,88 @@ class JournalDraftStore internal constructor(
             draft?.let { schedule(it) }
         }
         true
+    }
+
+    /** Only words are persisted; speech capture never creates a recording file. */
+    fun updateDictationText(text: String, durable: Boolean = false): Boolean = synchronized(lock) {
+        if (transferringDictation) return false
+        val previous = mutableDictation.value.text
+        val editor = prefs.edit()
+        if (text.isEmpty()) editor.remove(DICTATION_KEY) else editor.putString(DICTATION_KEY, text)
+        val saved = try {
+            if (durable) editor.commit() else { editor.apply(); true }
+        } catch (_: Exception) { false }
+        // commit() changes the preference cache even when its disk write fails.
+        // A failed discard must leave the words visible and available for retry.
+        val keptText = if (!saved && text.isEmpty()) previous else text
+        if (!saved && text.isEmpty()) runCatching {
+            prefs.edit().putString(DICTATION_KEY, previous).apply()
+        }
+        mutableDictation.value = DictationDraftState(keptText,
+            if (saved) null else "Could not preserve your spoken draft. Keep this screen open and try adding it again.")
+        saved
+    }
+
+    /** One preference commit moves reviewed words into the main draft without duplicate appends. */
+    suspend fun useDictationText(): Boolean {
+        val rollover = saveIfDue()
+        if (rollover == DraftSaveResult.FAILED || rollover == DraftSaveResult.BUSY) {
+            mutableDictation.value = mutableDictation.value.copy(
+                error = "Your journal could not finish saving. Your spoken text is kept; try adding it again."
+            )
+            return false
+        }
+        val transfer = synchronized(lock) {
+            val current = mutableState.value
+            val spoken = mutableDictation.value.text.trim()
+            if (transferringDictation || spoken.isBlank()) return false
+            if (current.saving || (current.draft == null && prefs.contains(KEY)) ||
+                current.draft?.isDue(clock.instant()) == true) {
+                mutableDictation.value = mutableDictation.value.copy(
+                    error = "Your journal is changing days or saving. Your spoken text is kept; please retry."
+                )
+                return false
+            }
+            val content = if (current.text.isBlank()) spoken else current.text.trimEnd() + "\n\n" + spoken
+            val draft = current.draft?.copy(content = content)
+                ?: JournalDraft.create(content, clock.instant(), zoneProvider())
+            transferringDictation = true
+            mutableState.value = current.copy(saving = true)
+            current to draft
+        }
+        val (previous, draft) = transfer
+        try {
+            withContext(Dispatchers.IO + NonCancellable) {
+                check(prefs.edit().putString(KEY, encode(draft)).remove(DICTATION_KEY).commit())
+                synchronized(lock) {
+                    mutableState.value = JournalDraftState(text = draft.content, draft = draft,
+                        message = "Spoken text added. Review your entry, then save.")
+                    mutableDictation.value = DictationDraftState()
+                }
+                if (previous.draft?.id != draft.id) schedule(draft)
+            }
+            return true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            synchronized(lock) {
+                // Restore both cached keys after a failed commit, so a retry neither
+                // mistakes the new draft for unreadable data nor appends words twice.
+                runCatching {
+                    val rollback = prefs.edit().putString(DICTATION_KEY, mutableDictation.value.text)
+                    if (previous.draft == null) rollback.remove(KEY)
+                    else rollback.putString(KEY, encode(previous.draft))
+                    rollback.apply()
+                }
+                mutableState.value = previous
+                mutableDictation.value = mutableDictation.value.copy(
+                    error = "Could not add the spoken text. It is kept here; please retry."
+                )
+            }
+            return false
+        } finally {
+            synchronized(lock) { transferringDictation = false }
+        }
     }
 
     private fun schedule(draft: JournalDraft) {
@@ -137,6 +226,7 @@ class JournalDraftStore internal constructor(
 
     companion object {
         internal const val KEY = "daily_journal_draft_v1"
+        internal const val DICTATION_KEY = "dictation_text_draft_v1"
         @Volatile private var instance: JournalDraftStore? = null
         fun get(context: Context): JournalDraftStore = instance ?: synchronized(this) {
             instance ?: JournalDraftStore(

@@ -17,7 +17,6 @@ import com.example.urgeprocessor.data.UrgeEntry
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
-import com.example.urgeprocessor.data.exportArchive
 import com.example.urgeprocessor.util.*
 import java.time.LocalDate
 import androidx.compose.foundation.layout.Row
@@ -49,7 +48,7 @@ fun ExportSettingsDialog(
         error = null
         scope.launch {
             try {
-                val text = if (backup) exportArchive(db) else {
+                val text = if (backup) "" else {
                     val start = dayStart(selectedDate)
                     val journals = db.urgeDao().getAllStandardJournals().first().filter { allDates || it.timestamp >= start }
                     val urges = db.urgeDao().getAllEntries().first().filter { allDates || it.timestamp >= start }
@@ -72,7 +71,7 @@ fun ExportSettingsDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Last export date: $lastExportStr", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                Text("Text exports are for reading. Entry backups restore all journals, urge records, and quotes; settings and drafts are not included.")
+                Text("Text exports are for reading. Entry backups include saved recordings and all journals, urge records, and quotes; settings and drafts are not included. Text exports omit audio.")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = allDates, onCheckedChange = { allDates = it }, enabled = !busy)
                     Text("All dates for text export")

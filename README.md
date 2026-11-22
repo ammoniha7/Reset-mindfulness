@@ -66,6 +66,26 @@ Calendar day ranges advance by calendar dates, including 23-hour and 25-hour day
 
 The current database stores dates as epoch milliseconds, so changing the device's time zone can still change the date shown for historical records. A date-only schema migration would be a separate change.
 
+## Voice recordings
+
+Open **Journal → Record a moment** to capture audio, pause/resume, stop, preview, optionally title it, and save it. Each recording appears alongside journal entries in the calendar's month records and selected-day dialog, with its original capture date, time, time zone, duration, play/pause, seeking, and confirmed deletion. Recording titles are searchable, and recordings also appear in On This Day.
+
+Microphone access is requested only when starting a recording. Recording and playback work offline. Audio is AAC in M4A files in the app's private storage; Room holds metadata separately, leaving room for future transcripts and trip links. Multiple recordings per day are supported.
+
+Recordings use the existing 4 a.m. journal-day cutoff. Their assigned date, actual capture timestamp, and original time zone are stored separately, so changing time zones does not move them to another calendar day. Captures after midnight can show the previous journal day as well as their actual timestamp.
+
+This version records while the app is visible. Leaving the app, locking the phone, or keeping the recording for later stops capture and preserves the unfinished audio for review. Unfinished recordings survive normal app reopening and configuration changes. An abrupt process kill during active capture can leave an unplayable file; the app reports that and allows discarding it. A save failure keeps playable audio for retry, and retrying cannot create duplicates.
+
+Entry backups stream saved audio into a ZIP with a versioned `entries.json` manifest; they omit unfinished recordings. Restore validates the complete file list and audio checksums before adding records, regenerates local IDs, and removes newly copied audio if the database import fails. Older JSON backups and text imports remain supported. Text exports contain written entries only. Include a ZIP backup when transferring recordings to another phone.
+
+## Speak to write
+
+Open **Journal → Speak to write** to dictate a text-only journal draft. Tap **Start speaking**, speak a section, and stop or wait for the speech service to finish. **Speak more** adds another section. Review or edit the words, choose **Add to journal**, then use the existing **Save Entry** button. Spoken text appends to existing writing as a new paragraph. Saved entries work with the calendar, search, backups, and exports just like typed entries.
+
+This feature uses Android speech recognition directly and never creates an audio file or a recording entry. On-device recognition is the default when Android 12+ and the phone's speech service support it. It never silently switches to online processing. **Use system speech** is an explicit alternative; that provider may process audio online under its own policies. Language packs, supported languages, punctuation, session length, and availability depend on the device's recognizer. This version transcribes speech; it does not use generative rewriting or filler-word cleanup.
+
+Interim phrases replace their previous hypothesis instead of duplicating words. Captured text is kept on the device for review when dictation is interrupted, the screen closes, or recognition fails. **Keep for later** preserves a separate spoken draft; **Discard text** leaves existing journal writing intact. Adding the reviewed text moves it into the main draft in one preference commit, preventing duplicate appends after reopening. The normal journal date and 4 a.m. rollover rules apply when the text is added. Unfinished spoken drafts are not included in entry backups.
+
 ## Automatic journal submission
 
 Unsent text in the main Daily Journal box is saved automatically when its journal day ends at 4 a.m. For example, a draft written Thursday evening or Friday at 2 a.m. becomes a Thursday journal entry at Friday's cutoff. The editor then clears for the new day. Blank drafts are ignored, and Save Entry still works normally.
@@ -80,16 +100,16 @@ Saving locks the editor briefly, inserts with the draft's unique ID, and clears 
 
 Open **Journal → Export**:
 
-- **Save entry backup** writes a versioned JSON file containing every saved journal, urge record (including emotion color and all answers), and quote. It preserves timestamps and text exactly. It does not include drafts, theme preferences, or counters.
+- **Save entry backup** writes a versioned ZIP file containing every saved recording (metadata and audio), journal, urge record (including emotion color and all answers), and quote. It preserves timestamps and text exactly. It does not include drafts, theme preferences, or counters.
 - **Export text** writes a readable chronological report. It defaults to all dates; optionally choose an inclusive starting date. A text report is not a complete restorable backup.
 
-Open **Journal → Import** to select the JSON file or paste dated journal text. Imports append records, assign new local IDs, and do not overwrite existing records. Importing the same file more than once creates duplicates. All records are parsed before writing, and the write is transactional: a failed import leaves no partial additions.
+Open **Journal → Import** to select a ZIP backup, an older JSON backup, or paste dated journal text. Imports append records, assign new local IDs, and do not overwrite existing records. Importing the same file more than once creates duplicates. All records are parsed before writing, and the write is transactional: a failed import leaves no partial additions.
 
 Text input accepts a new entry header at the beginning of a line, using `MM-DD-YYYY:` or `MM/DD/YYYY:`. A header can share a line with its content. Invalid dates, empty entries, and text before the first header are rejected. Dates inside prose do not split entries, but a date at the beginning of a line is treated as a new header. JSON backups avoid this ambiguity. Old `[Journal]` and `[Urge Flow]` text exports are supported, including optional and multiline Loved, Stress, and Excited answers. Text exports omit emotion colors, exact times, and quotes; these cannot be recovered from the report. Urges are restored at midnight on their exported date with an unset color. Repeated or out-of-order answer labels are rejected. The old format did not escape date headers or answer labels in prose, so review restored entries and retain the original file.
 
 ## Database preservation
 
-The database is at schema version 6. An explicit 5→6 migration preserves existing records and adds a nullable, unique source-draft ID for retry-safe journal autosaving. Its exported schema is stored in `app/schemas/`; include schema files in Git when changing entities. Room is now pinned to 2.8.5, with schema export configured through its Gradle plugin.
+The database is at schema version 7. An explicit 6→7 migration adds recording metadata without modifying existing entries. An explicit 5→6 migration preserves existing records and adds a nullable, unique source-draft ID for retry-safe journal autosaving. Its exported schema is stored in `app/schemas/`; include schema files in Git when changing entities. Room is now pinned to 2.8.5, with schema export configured through its Gradle plugin.
 
 Destructive migration fallback is disabled. Unsupported database versions fail to open while preserving their data. Historical schemas for versions 1–4 were not present in the recovered project, so no speculative migrations have been added. Supporting those versions requires recovering their actual schema definitions first.
 

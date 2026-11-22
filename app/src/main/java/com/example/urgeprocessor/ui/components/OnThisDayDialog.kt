@@ -12,6 +12,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.urgeprocessor.audio.RecordingPlayer
+import com.example.urgeprocessor.data.AppDatabase
+import com.example.urgeprocessor.data.RecordingEntry
 import com.example.urgeprocessor.data.StandardJournalEntry
 import com.example.urgeprocessor.data.UrgeEntry
 import com.example.urgeprocessor.util.onThisDayEntries
@@ -27,10 +30,13 @@ fun OnThisDayDialog(
     urges: List<UrgeEntry>,
     journalColor: Color,
     urgeColor: Color,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    recordings: List<RecordingEntry> = emptyList(),
+    player: RecordingPlayer? = null,
+    db: AppDatabase? = null
 ) {
     val zone = ZoneId.systemDefault()
-    val years = remember(date, journals, urges, zone) { onThisDayEntries(journals, urges, date, zone) }
+    val years = remember(date, journals, urges, zone, recordings) { onThisDayEntries(journals, urges, date, zone, recordings) }
     val dateLabel = date.format(DateTimeFormatter.ofPattern("MMMM d", Locale.getDefault()))
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -59,6 +65,11 @@ fun OnThisDayDialog(
                                             Text(entry.content)
                                         }
                                     }
+                                }
+                            }
+                            if (player != null && db != null) {
+                                items(year.recordings, key = { "recording-${it.id}" }) { entry ->
+                                    RecordingCard(entry, player, db)
                                 }
                             }
                             items(year.urges, key = { "urge-${it.id}" }) { entry ->
